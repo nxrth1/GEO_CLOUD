@@ -1,0 +1,196 @@
+
+geocloud/
+│
+├── apps/
+│   ├── api/                         # FastAPI application
+│   │   ├── main.py
+│   │   ├── dependencies.py
+│   │   ├── middleware/
+│   │   │   ├── request_id.py
+│   │   │   ├── tenant_context.py
+│   │   │   └── rate_limit.py
+│   │   └── routers/
+│   │       ├── health.py
+│   │       ├── datasets.py
+│   │       ├── jobs.py
+│   │       ├── operations.py
+│   │       ├── tenants.py
+│   │       ├── usage.py
+│   │       └── webhooks.py
+│   │
+│   ├── worker/                      # Background job execution
+│   │   ├── main.py
+│   │   ├── bootstrap.py
+│   │   ├── task_handlers.py
+│   │   ├── heartbeat.py
+│   │   └── shutdown.py
+│   │
+│   └── scheduler/                   # Job dispatch and recovery
+│       ├── main.py
+│       ├── dispatcher.py
+│       ├── lease_reaper.py
+│       └── quota_scheduler.py
+│
+├── geocloud/                        # Shared application package
+│   ├── domain/
+│   │   ├── datasets/
+│   │   │   ├── models.py
+│   │   │   ├── service.py
+│   │   │   └── exceptions.py
+│   │   ├── jobs/
+│   │   │   ├── models.py
+│   │   │   ├── state_machine.py
+│   │   │   ├── service.py
+│   │   │   └── exceptions.py
+│   │   ├── tenants/
+│   │   │   ├── models.py
+│   │   │   ├── quotas.py
+│   │   │   └── service.py
+│   │   └── webhooks/
+│   │       ├── models.py
+│   │       ├── signing.py
+│   │       └── delivery.py
+│   │
+│   ├── geospatial/                  # GIS processing engine
+│   │   ├── registry.py
+│   │   ├── validation/
+│   │   │   ├── vector.py
+│   │   │   ├── raster.py
+│   │   │   ├── crs.py
+│   │   │   └── geometry.py
+│   │   ├── vector/
+│   │   │   ├── reproject.py
+│   │   │   ├── buffer.py
+│   │   │   ├── overlay.py
+│   │   │   └── spatial_join.py
+│   │   ├── raster/
+│   │   │   ├── slope.py
+│   │   │   ├── aspect.py
+│   │   │   ├── hillshade.py
+│   │   │   └── reproject.py
+│   │   └── common/
+│   │       ├── metadata.py
+│   │       └── crs_utils.py
+│   │
+│   ├── infrastructure/              # External technology adapters
+│   │   ├── database/
+│   │   │   ├── models.py
+│   │   │   ├── repositories.py
+│   │   │   ├── session.py
+│   │   │   └── migrations/
+│   │   ├── queue/
+│   │   │   ├── publisher.py
+│   │   │   ├── consumer.py
+│   │   │   └── messages.py
+│   │   ├── storage/
+│   │   │   ├── interface.py
+│   │   │   ├── local.py
+│   │   │   └── s3.py
+│   │   └── observability/
+│   │       ├── logging.py
+│   │       ├── metrics.py
+│   │       └── tracing.py
+│   │
+│   ├── security/
+│   │   ├── authentication.py
+│   │   ├── authorization.py
+│   │   ├── api_keys.py
+│   │   └── tenant_isolation.py
+│   │
+│   ├── config/
+│   │   ├── settings.py
+│   │   └── logging.py
+│   │
+│   └── shared/
+│       ├── enums.py
+│       ├── errors.py
+│       └── utilities.py
+│
+├── frontend/                        # Web dashboard (later)
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── features/
+│   │   │   ├── datasets/
+│   │   │   ├── jobs/
+│   │   │   ├── workers/
+│   │   │   └── usage/
+│   │   └── api/
+│   └── package.json
+│
+├── tests/
+│   ├── unit/
+│   │   ├── test_job_state_machine.py
+│   │   ├── test_quotas.py
+│   │   └── test_geospatial_operations.py
+│   ├── integration/
+│   │   ├── test_dataset_upload.py
+│   │   ├── test_job_execution.py
+│   │   └── test_webhook_delivery.py
+│   ├── contract/
+│   │   └── test_api_contracts.py
+│   ├── security/
+│   │   └── test_tenant_isolation.py
+│   ├── resilience/
+│   │   └── test_worker_recovery.py
+│   ├── load/
+│   │   └── test_job_throughput.py
+│   └── conftest.py
+│
+├── migrations/                      # Alembic database migrations
+├── scripts/
+│   ├── seed_dev_data.py
+│   ├── create_test_datasets.py
+│   └── simulate_worker_failure.py
+│
+├── deploy/
+│   ├── docker/
+│   │   ├── api.Dockerfile
+│   │   └── worker.Dockerfile
+│   ├── prometheus/
+│   │   └── prometheus.yml
+│   └── grafana/
+│       └── dashboards/
+│
+├── docs/
+│   ├── architecture.md
+│   ├── api.md
+│   ├── job-lifecycle.md
+│   ├── tenancy.md
+│   ├── failure-recovery.md
+│   └── decisions/
+│
+├── .github/
+│   └── workflows/
+│       ├── tests.yml
+│       └── lint.yml
+│
+├── docker-compose.yml
+├── pyproject.toml
+├── alembic.ini
+├── .env.example
+├── .gitignore
+├── Makefile
+└── README.md
+
+
+
+What the important directories do
+Directory	Responsibility
+apps/api	Accept requests, authenticate users and return responses.
+apps/worker	Execute long-running geospatial jobs outside the API process.
+apps/scheduler	Dispatch eligible jobs and recover expired worker leases.
+geocloud/domain	Define business rules for jobs, tenants, datasets and webhooks.
+geocloud/geospatial	Implement the actual GIS algorithms and data validation.
+geocloud/infrastructure	Handle PostgreSQL, Redis, object storage and observability integrations.
+geocloud/security	Enforce access control, API-key validation and tenant isolation.
+tests/resilience	Verify recovery from crashes, timeouts and partial failures.
+deploy	Store deployment and monitoring configuration.
+
+
+
+"""
+Build a small FastAPI application, read GeoJSON data, 
+validate geometries, and implement your first spatial operation.
+Goal: working code with automated tests.
+"""
