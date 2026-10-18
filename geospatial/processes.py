@@ -584,7 +584,7 @@ def validate_json(
     rules=None,
     coverage_geometry=None
 ):
-    """Validate an RFC 7946 GeoJSON file against optional dataset constraints."""
+    """Validate GeoJSON data or a file against optional dataset constraints."""
     try:
         configured_rules = _resolve_validation_rules(
             rules,
@@ -612,35 +612,38 @@ def validate_json(
             "message": "Validation configuration is invalid."
         }
 
-    path = Path(geo_path)
-    if not path.exists():
-        document_issue = _validation_issue(
-            "geojson_document",
-            "critical",
-            f"File path does not exist: {path}."
-        )
-        return {
-            "is_valid": False,
-            "accepted": False,
-            "feature_count": 0,
-            "issues": [document_issue],
-            "message": "GeoJSON file could not be read."
-        }
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeError) as error:
-        document_issue = _validation_issue(
-            "geojson_document",
-            "critical",
-            f"Could not read GeoJSON: {error}"
-        )
-        return {
-            "is_valid": False,
-            "accepted": False,
-            "feature_count": 0,
-            "issues": [document_issue],
-            "message": "GeoJSON file could not be read."
-        }
+    if isinstance(geo_path, dict):
+        data = geo_path
+    else:
+        path = Path(geo_path)
+        if not path.exists():
+            document_issue = _validation_issue(
+                "geojson_document",
+                "critical",
+                f"File path does not exist: {path}."
+            )
+            return {
+                "is_valid": False,
+                "accepted": False,
+                "feature_count": 0,
+                "issues": [document_issue],
+                "message": "GeoJSON file could not be read."
+            }
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeError) as error:
+            document_issue = _validation_issue(
+                "geojson_document",
+                "critical",
+                f"Could not read GeoJSON: {error}"
+            )
+            return {
+                "is_valid": False,
+                "accepted": False,
+                "feature_count": 0,
+                "issues": [document_issue],
+                "message": "GeoJSON file could not be read."
+            }
 
     if not isinstance(data, dict) or data.get("type") != "FeatureCollection":
         issue = _validation_issue(

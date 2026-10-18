@@ -50,6 +50,14 @@ def test_valid_collection_allows_missing_ids_and_nested_polygon_coordinates(tmp_
     assert result["issues"] == []
 
 
+def test_validate_json_accepts_geojson_object_directly():
+    result = validate_json(collection(feature(point())))
+
+    assert result["accepted"] is True
+    assert result["feature_count"] == 1
+    assert result["issues"] == []
+
+
 def test_reports_out_of_range_coordinates_nested_in_multipolygon(tmp_path):
     multipolygon = {
         "type": "MultiPolygon",

@@ -1,15 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from processes import -------
+
+from .routes import router
+
 
 app = FastAPI(
     title="GEOSPATIAL_PROCESSES",
     description="Geospatial processing with FastAPI",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 origins = [
-
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
@@ -18,15 +19,10 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-""" 
+
 app.include_router(router)
-Base.metadata.create_all(bind=engine)
-
-app.mount(
-    "/",
-    StaticFiles(directory=Path(__file__).parent / "frontend", html=True),
-    name="frontend",
-)
-
-"""
