@@ -1,9 +1,12 @@
+import json
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from pyproj.exceptions import CRSError
 
+from .datasets import load_dataset, save_dataset
 from .operations import (
     buffer,
     clip as clip_operation,
@@ -154,6 +157,39 @@ class NearestFeatureRequest(BaseModel):
     projected_crs: str = Field(min_length=1)
     how: str = Field(min_length=1)
     distance_col: str = Field(min_length=1)
+
+
+class DatasetRequest(BaseModel):
+    geojson: dict[str, Any]
+
+
+@router.post("/datasets", status_code=201)
+def create_dataset(request: DatasetRequest):
+    validation = _validate_geojson(request.geojson)
+    try:
+        dataset_id = save_dataset(request.geojson)
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save dataset.",
+        ) from error
+
+    return {"id": str(dataset_id), "validation": validation}
+
+
+@router.get("/datasets/{dataset_id}")
+def get_dataset(dataset_id: UUID):
+    try:
+        geojson = load_dataset(dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Dataset not found.") from error
+    except (OSError, json.JSONDecodeError) as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not read dataset.",
+        ) from error
+
+    return {"id": str(dataset_id), "geojson": geojson}
 
 
 @router.post("/nearest_feature")
