@@ -447,7 +447,7 @@ def create_dataset_nearest_feature(
         "validation": {"source": validation, "target": target_validation},
     }
 
-
+"""
 Start with a narrow slice:
 
 Define a persisted job record: ID, operation, input dataset IDs, options, status (queued, running, succeeded, failed), output dataset ID, and error.
@@ -455,3 +455,5 @@ Add POST /jobs to submit a job and return 202 Accepted with its ID.
 Add GET /jobs/{job_id} to report status and, when complete, the result dataset ID.
 Add a separate worker process to claim queued jobs, call the existing operation, save the result, and update the job.
 Implement buffer first to prove the lifecycle, then add the other operations.
+
+"""
