@@ -75,6 +75,7 @@ class DifferenceRequest(BaseModel):
 
 @router.post("/difference")
 def difference(request:DifferenceRequest):
+    validation = validate_json(request.geojson)
     if not validation["accepted"]:
         raise HTTPException(
             status_code=422,
@@ -103,6 +104,7 @@ class DissolveRequest(BaseModel):
 
 @router.post("/dissolve")
 def dissolve(request:DissolveRequest):
+    validation = validate_json(request.geojson)
     if not validation["accepted"]:
         raise HTTPException(
             status_code=422,
@@ -134,6 +136,7 @@ class SpatialJoinRequest(BaseModel):
 
 @router.post("/spatial_join")
 def spatial_join(request:SpatialJoinRequest):
+    validation = validate_json(request.geojson)
     if not validation["accepted"]:
         raise HTTPException(
             status_code=422,
@@ -157,7 +160,7 @@ def spatial_join(request:SpatialJoinRequest):
     return {"validation": validation, "result": result}
 
 
-class SpatialJoinRequest(BaseModel):
+class NearestFeatureRequest(BaseModel):
     geojson: dict[str, Any]
     mask: dict[str, Any]
     projected_crs: str = Field(min_length=1)
@@ -168,6 +171,7 @@ class SpatialJoinRequest(BaseModel):
 
 @router.post("/nearest_feature")
 def nearest_feature(request:NearestFeatureRequest):
+    validation = validate_json(request.geojson)
     if not validation["accepted"]:
         raise HTTPException(
             status_code=422,
