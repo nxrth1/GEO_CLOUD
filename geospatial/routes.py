@@ -2,11 +2,15 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from pyproj.exceptions import CRSError
+from sqlalchemy.orm import Session
 
+from .database import SessionLocal
 from .datasets import load_dataset, save_dataset
+from .job_repository import create_queued_job, get_job
+from .models import JobOperation
 from .operations import (
     buffer,
     clip as clip_operation,
@@ -19,6 +23,14 @@ from .processes import validate_json
 
 
 router = APIRouter()
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def _validate_geojson(data, *, field_name="geojson"):
@@ -160,6 +172,76 @@ class NearestFeatureRequest(BaseModel):
 
 class DatasetRequest(BaseModel):
     geojson: dict[str, Any]
+
+
+class JobCreateRequest(BaseModel):
+    operation: str = Field(min_length=1)
+    source_dataset_id: UUID
+    secondary_dataset_id: UUID | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/jobs", status_code=202)
+def create_job(request: JobCreateRequest, db: Session = Depends(get_db)):
+    try:
+        operation = JobOperation(request.operation)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported operation: {request.operation}",
+        ) from error
+
+    try:
+        load_dataset(request.source_dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Source dataset not found.") from error
+    except (OSError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=500, detail="Could not read source dataset.") from error
+
+    if request.secondary_dataset_id is not None:
+        try:
+            load_dataset(request.secondary_dataset_id)
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail="Secondary dataset not found.") from error
+        except (OSError, json.JSONDecodeError) as error:
+            raise HTTPException(status_code=500, detail="Could not read secondary dataset.") from error
+
+    job = create_queued_job(
+        db,
+        operation=operation,
+        source_dataset_id=request.source_dataset_id,
+        secondary_dataset_id=request.secondary_dataset_id,
+        parameters=request.parameters,
+    )
+    db.commit()
+    db.refresh(job)
+
+    return {
+        "id": str(job.id),
+        "operation": job.operation.value,
+        "status": job.status.value,
+    }
+
+
+@router.get("/jobs/{job_id}")
+def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
+    job = get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    return {
+        "id": str(job.id),
+        "operation": job.operation.value,
+        "status": job.status.value,
+        "source_dataset_id": str(job.source_dataset_id),
+        "secondary_dataset_id": str(job.secondary_dataset_id) if job.secondary_dataset_id else None,
+        "result_dataset_id": str(job.result_dataset_id) if job.result_dataset_id else None,
+        "parameters": job.parameters,
+        "error_message": job.error_message,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+    }
 
 
 @router.post("/datasets", status_code=201)
@@ -446,14 +528,3 @@ def create_dataset_nearest_feature(
         "id": str(result_id),
         "validation": {"source": validation, "target": target_validation},
     }
-
-"""
-Start with a narrow slice:
-
-Define a persisted job record: ID, operation, input dataset IDs, options, status (queued, running, succeeded, failed), output dataset ID, and error.
-Add POST /jobs to submit a job and return 202 Accepted with its ID.
-Add GET /jobs/{job_id} to report status and, when complete, the result dataset ID.
-Add a separate worker process to claim queued jobs, call the existing operation, save the result, and update the job.
-Implement buffer first to prove the lifecycle, then add the other operations.
-
-"""
