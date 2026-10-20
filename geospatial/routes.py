@@ -40,6 +40,10 @@ def create_buffer(request: BufferRequest):
 
     return {"validation": validation, "result": result}
 
+class ClipRequest(BaseModel):
+    geojson: dict[str, Any]
+    mask: dict[str, Any]
+    analysis_crs: str = Field(min_length=1)
 
 @router.post("/clip")
 def clip(request:ClipRequest):
@@ -64,6 +68,11 @@ def clip(request:ClipRequest):
     return {"validation": validation, "result": result}
 
 
+class DifferenceRequest(BaseModel):
+    geojson: dict[str, Any]
+    mask: dict[str, Any]
+    analysis_crs: str = Field(min_length=1)
+
 @router.post("/difference")
 def difference(request:DifferenceRequest):
     if not validation["accepted"]:
@@ -87,6 +96,11 @@ def difference(request:DifferenceRequest):
     return {"validation": validation, "result": result}
 
 
+class DissolveRequest(BaseModel):
+    geojson: dict[str, Any]
+    by: str = Field(None)
+    analysis_crs: str = Field(min_length=1)
+
 @router.post("/dissolve")
 def dissolve(request:DissolveRequest):
     if not validation["accepted"]:
@@ -108,6 +122,14 @@ def dissolve(request:DissolveRequest):
         raise HTTPException(status_code=422, detail=str(error)) from error
 
     return {"validation": validation, "result": result}
+
+
+class SpatialJoinRequest(BaseModel):
+    geojson: dict[str, Any]
+    mask: dict[str, Any]
+    how: str = Field(min_length=1)
+    predicate: str = Field(min_length=1)
+    analysis_crs: str = Field(min_length=1)
 
 
 @router.post("/spatial_join")
@@ -135,6 +157,15 @@ def spatial_join(request:SpatialJoinRequest):
     return {"validation": validation, "result": result}
 
 
+class SpatialJoinRequest(BaseModel):
+    geojson: dict[str, Any]
+    mask: dict[str, Any]
+    projected_crs: str = Field(min_length=1)
+    how: str = Field(min_length=1)
+    distance_col: float = Field(ge=0)
+
+
+
 @router.post("/nearest_feature")
 def nearest_feature(request:NearestFeatureRequest):
     if not validation["accepted"]:
@@ -152,7 +183,7 @@ def nearest_feature(request:NearestFeatureRequest):
             request.mask,
             request.projected_crs,
             request.how,
-            request.distance.col,
+            request.distance_col,
         )
     except (CRSError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
