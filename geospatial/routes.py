@@ -39,3 +39,122 @@ def create_buffer(request: BufferRequest):
         raise HTTPException(status_code=422, detail=str(error)) from error
 
     return {"validation": validation, "result": result}
+
+
+@router.post("/clip")
+def clip(request:ClipRequest):
+    if not validation["accepted"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "GeoJSON failed critical validation rules.",
+                "validation": validation,
+            },
+        )
+
+    try:
+        result = clip(
+            request.geojson,
+            request.mask,
+            request.analysis_crs,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return {"validation": validation, "result": result}
+
+
+@router.post("/difference")
+def difference(request:DifferenceRequest):
+    if not validation["accepted"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "GeoJSON failed critical validation rules.",
+                "validation": validation,
+            },
+        )
+
+    try:
+        result = difference(
+            request.geojson,
+            request.mask,
+            request.analysis_crs,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return {"validation": validation, "result": result}
+
+
+@router.post("/dissolve")
+def dissolve(request:DissolveRequest):
+    if not validation["accepted"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "GeoJSON failed critical validation rules.",
+                "validation": validation,
+            },
+        )
+
+    try:
+        result = dissolve(
+            request.geojson,
+            request.by,
+            request.analysis_crs,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return {"validation": validation, "result": result}
+
+
+@router.post("/spatial_join")
+def spatial_join(request:SpatialJoinRequest):
+    if not validation["accepted"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "GeoJSON failed critical validation rules.",
+                "validation": validation,
+            },
+        )
+
+    try:
+        result = spatial_join(
+            request.geojson,
+            request.mask,
+            request.how,
+            request.predicate,
+            request.analysis_crs,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return {"validation": validation, "result": result}
+
+
+@router.post("/nearest_feature")
+def nearest_feature(request:NearestFeatureRequest):
+    if not validation["accepted"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "GeoJSON failed critical validation rules.",
+                "validation": validation,
+            },
+        )
+
+    try:
+        result = nearest_feature(
+            request.geojson,
+            request.mask,
+            request.projected_crs,
+            request.how,
+            request.distance.col,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return {"validation": validation, "result": result}
