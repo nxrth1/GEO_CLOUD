@@ -61,7 +61,6 @@ class ClipRequest(BaseModel):
     mask: dict[str, Any]
     analysis_crs: str = Field(min_length=1)
 
-
 @router.post("/clip")
 def clip(request: ClipRequest):
     validation = _validate_geojson(request.geojson)
@@ -209,3 +208,32 @@ def nearest_feature(request: NearestFeatureRequest):
         raise HTTPException(status_code=422, detail=str(error)) from error
 
     return {"validation": validation, "result": result}
+
+class DatasetBufferRequest(BaseModel):
+    projected_crs: str = Field(min_length=1)
+    distance_in_metres: float = Field(ge=0)
+
+@router.post("/datasets/{dataset_id}/buffer", status_code=201)
+def create_dataset_buffer(dataset_id: UUID, request: DatasetBufferRequest):
+    try:
+        source = load_dataset(dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Dataset not found.") from error
+
+    validation = _validate_geojson(source)
+
+    try:
+        result = buffer(
+            source,
+            request.projected_crs,
+            request.distance_in_metres,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        result_id = save_dataset(result)
+    except OSError as error:
+        raise HTTPException(status_code=500, detail="Could not save result dataset.") from error
+
+    return {"id": str(result_id), "validation": validation}
