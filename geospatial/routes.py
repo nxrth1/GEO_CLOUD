@@ -237,3 +237,212 @@ def create_dataset_buffer(dataset_id: UUID, request: DatasetBufferRequest):
         raise HTTPException(status_code=500, detail="Could not save result dataset.") from error
 
     return {"id": str(result_id), "validation": validation}
+
+
+class DatasetClipRequest(BaseModel):
+    mask_dataset_id: UUID
+    analysis_crs: str = Field(min_length=1)
+
+
+@router.post("/datasets/{dataset_id}/clip", status_code=201)
+def create_dataset_clip(dataset_id: UUID, request: DatasetClipRequest):
+    try:
+        source = load_dataset(dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Dataset not found.") from error
+
+    try:
+        mask = load_dataset(request.mask_dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Mask dataset not found.") from error
+
+    validation = _validate_geojson(source)
+    mask_validation = _validate_geojson(mask, field_name="mask")
+
+    try:
+        result = clip_operation(
+            source,
+            mask,
+            request.analysis_crs,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        result_id = save_dataset(result)
+    except OSError as error:
+        raise HTTPException(status_code=500, detail="Could not save result dataset.") from error
+
+    return {
+        "id": str(result_id),
+        "validation": {"source": validation, "mask": mask_validation},
+    }
+
+
+class DatasetDifferenceRequest(BaseModel):
+    mask_dataset_id: UUID
+    analysis_crs: str = Field(min_length=1)
+
+
+@router.post("/datasets/{dataset_id}/difference", status_code=201)
+def create_dataset_difference(dataset_id: UUID, request: DatasetDifferenceRequest):
+    try:
+        source = load_dataset(dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Dataset not found.") from error
+
+    try:
+        mask = load_dataset(request.mask_dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Mask dataset not found.") from error
+
+    validation = _validate_geojson(source)
+    mask_validation = _validate_geojson(mask, field_name="mask")
+
+    try:
+        result = difference_operation(source, mask, request.analysis_crs)
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        result_id = save_dataset(result)
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save result dataset.",
+        ) from error
+
+    return {
+        "id": str(result_id),
+        "validation": {"source": validation, "mask": mask_validation},
+    }
+
+
+class DatasetDissolveRequest(BaseModel):
+    by: str | None = None
+    analysis_crs: str = Field(min_length=1)
+
+
+@router.post("/datasets/{dataset_id}/dissolve", status_code=201)
+def create_dataset_dissolve(dataset_id: UUID, request: DatasetDissolveRequest):
+    try:
+        source = load_dataset(dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Dataset not found.") from error
+
+    validation = _validate_geojson(source)
+
+    try:
+        result = dissolve_operation(source, request.by, request.analysis_crs)
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        result_id = save_dataset(result)
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save result dataset.",
+        ) from error
+
+    return {"id": str(result_id), "validation": validation}
+
+
+class DatasetSpatialJoinRequest(BaseModel):
+    mask_dataset_id: UUID
+    how: str = Field(min_length=1)
+    predicate: str = Field(min_length=1)
+    analysis_crs: str = Field(min_length=1)
+
+
+@router.post("/datasets/{dataset_id}/spatial_join", status_code=201)
+def create_dataset_spatial_join(
+    dataset_id: UUID,
+    request: DatasetSpatialJoinRequest,
+):
+    try:
+        source = load_dataset(dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Dataset not found.") from error
+
+    try:
+        mask = load_dataset(request.mask_dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Mask dataset not found.") from error
+
+    validation = _validate_geojson(source)
+    mask_validation = _validate_geojson(mask, field_name="mask")
+
+    try:
+        result = spatial_join_operation(
+            source,
+            mask,
+            request.how,
+            request.predicate,
+            request.analysis_crs,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        result_id = save_dataset(result)
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save result dataset.",
+        ) from error
+
+    return {
+        "id": str(result_id),
+        "validation": {"source": validation, "mask": mask_validation},
+    }
+
+
+class DatasetNearestFeatureRequest(BaseModel):
+    target_dataset_id: UUID
+    projected_crs: str = Field(min_length=1)
+    how: str = Field(min_length=1)
+    distance_col: str = Field(min_length=1)
+
+
+@router.post("/datasets/{dataset_id}/nearest_feature", status_code=201)
+def create_dataset_nearest_feature(
+    dataset_id: UUID,
+    request: DatasetNearestFeatureRequest,
+):
+    try:
+        source = load_dataset(dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Dataset not found.") from error
+
+    try:
+        target = load_dataset(request.target_dataset_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Target dataset not found.") from error
+
+    validation = _validate_geojson(source)
+    target_validation = _validate_geojson(target, field_name="target")
+
+    try:
+        result = nearest_feature_operation(
+            source,
+            target,
+            request.projected_crs,
+            request.how,
+            request.distance_col,
+        )
+    except (CRSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        result_id = save_dataset(result)
+    except OSError as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save result dataset.",
+        ) from error
+
+    return {
+        "id": str(result_id),
+        "validation": {"source": validation, "target": target_validation},
+    }
