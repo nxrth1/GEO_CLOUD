@@ -4,11 +4,31 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from pyproj.exceptions import CRSError
 
-from .operations import buffer
+from .operations import (
+    buffer,
+    clip as clip_operation,
+    difference as difference_operation,
+    dissolve as dissolve_operation,
+    nearest_feature as nearest_feature_operation,
+    spatial_join as spatial_join_operation,
+)
 from .processes import validate_json
 
 
 router = APIRouter()
+
+
+def _validate_geojson(data, *, field_name="geojson"):
+    validation = validate_json(data)
+    if not validation["accepted"]:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": f"{field_name} failed critical validation rules.",
+                "validation": validation,
+            },
+        )
+    return validation
 
 
 class BufferRequest(BaseModel):
@@ -19,15 +39,7 @@ class BufferRequest(BaseModel):
 
 @router.post("/buffer")
 def create_buffer(request: BufferRequest):
-    validation = validate_json(request.geojson)
-    if not validation["accepted"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "GeoJSON failed critical validation rules.",
-                "validation": validation,
-            },
-        )
+    validation = _validate_geojson(request.geojson)
 
     try:
         result = buffer(
@@ -40,24 +52,20 @@ def create_buffer(request: BufferRequest):
 
     return {"validation": validation, "result": result}
 
+
 class ClipRequest(BaseModel):
     geojson: dict[str, Any]
     mask: dict[str, Any]
     analysis_crs: str = Field(min_length=1)
 
+
 @router.post("/clip")
-def clip(request:ClipRequest):
-    if not validation["accepted"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "GeoJSON failed critical validation rules.",
-                "validation": validation,
-            },
-        )
+def clip(request: ClipRequest):
+    validation = _validate_geojson(request.geojson)
+    _validate_geojson(request.mask, field_name="mask")
 
     try:
-        result = clip(
+        result = clip_operation(
             request.geojson,
             request.mask,
             request.analysis_crs,
@@ -73,20 +81,14 @@ class DifferenceRequest(BaseModel):
     mask: dict[str, Any]
     analysis_crs: str = Field(min_length=1)
 
+
 @router.post("/difference")
-def difference(request:DifferenceRequest):
-    validation = validate_json(request.geojson)
-    if not validation["accepted"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "GeoJSON failed critical validation rules.",
-                "validation": validation,
-            },
-        )
+def difference(request: DifferenceRequest):
+    validation = _validate_geojson(request.geojson)
+    _validate_geojson(request.mask, field_name="mask")
 
     try:
-        result = difference(
+        result = difference_operation(
             request.geojson,
             request.mask,
             request.analysis_crs,
@@ -99,23 +101,16 @@ def difference(request:DifferenceRequest):
 
 class DissolveRequest(BaseModel):
     geojson: dict[str, Any]
-    by: str = Field(None)
+    by: str | None = None
     analysis_crs: str = Field(min_length=1)
 
+
 @router.post("/dissolve")
-def dissolve(request:DissolveRequest):
-    validation = validate_json(request.geojson)
-    if not validation["accepted"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "GeoJSON failed critical validation rules.",
-                "validation": validation,
-            },
-        )
+def dissolve(request: DissolveRequest):
+    validation = _validate_geojson(request.geojson)
 
     try:
-        result = dissolve(
+        result = dissolve_operation(
             request.geojson,
             request.by,
             request.analysis_crs,
@@ -135,19 +130,12 @@ class SpatialJoinRequest(BaseModel):
 
 
 @router.post("/spatial_join")
-def spatial_join(request:SpatialJoinRequest):
-    validation = validate_json(request.geojson)
-    if not validation["accepted"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "GeoJSON failed critical validation rules.",
-                "validation": validation,
-            },
-        )
+def spatial_join(request: SpatialJoinRequest):
+    validation = _validate_geojson(request.geojson)
+    _validate_geojson(request.mask, field_name="mask")
 
     try:
-        result = spatial_join(
+        result = spatial_join_operation(
             request.geojson,
             request.mask,
             request.how,
@@ -165,24 +153,16 @@ class NearestFeatureRequest(BaseModel):
     mask: dict[str, Any]
     projected_crs: str = Field(min_length=1)
     how: str = Field(min_length=1)
-    distance_col: float = Field(ge=0)
-
+    distance_col: str = Field(min_length=1)
 
 
 @router.post("/nearest_feature")
-def nearest_feature(request:NearestFeatureRequest):
-    validation = validate_json(request.geojson)
-    if not validation["accepted"]:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "GeoJSON failed critical validation rules.",
-                "validation": validation,
-            },
-        )
+def nearest_feature(request: NearestFeatureRequest):
+    validation = _validate_geojson(request.geojson)
+    _validate_geojson(request.mask, field_name="mask")
 
     try:
-        result = nearest_feature(
+        result = nearest_feature_operation(
             request.geojson,
             request.mask,
             request.projected_crs,
