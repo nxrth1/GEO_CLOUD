@@ -528,3 +528,15 @@ def create_dataset_nearest_feature(
         "id": str(result_id),
         "validation": {"source": validation, "target": target_validation},
     }
+
+
+"""
+The next step is the worker layer:
+
+claim queued jobs
+execute the operation
+save result dataset
+update status to succeeded/failed
+
+
+"""
