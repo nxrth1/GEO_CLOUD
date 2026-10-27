@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -113,7 +114,6 @@ def execute_job(job_data):
 
     raise ValueError(f"Unsupported operation: {operation.value}")
 
-
 def save_job_result(result):
     return save_dataset(result)
 
@@ -145,3 +145,29 @@ def mark_failed(job_id, message):
         job.result_dataset_id = None
         job.error_message = str(message)
         job.finished_at = datetime.now(timezone.utc)
+
+
+def process_next_job():
+    job_data = claim_next_job()
+    if job_data is None:
+        return False
+
+    try:
+        result = execute_job(job_data)
+        result_dataset_id = save_job_result(result)
+    except Exception as error:
+        mark_failed(job_data["id"], str(error))
+        return True
+
+    mark_succeeded(job_data["id"], result_dataset_id)
+    return True
+
+
+def run_worker(poll_interval=1.0):
+    while True:
+        if not process_next_job():
+            time.sleep(poll_interval)
+
+
+if __name__ == "__main__":
+    run_worker()
