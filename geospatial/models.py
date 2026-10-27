@@ -28,7 +28,9 @@ class JobStatus(str, enum.Enum):
 
 class Job(Base):
     __tablename__ = "jobs"
-    __table_args__ = (Index("ix_jobs_status_created_at", "status", "created_at"),)
+    __table_args__ = (Index("ix_jobs_status_created_at", "status", "created_at"),
+                      Index("ix_jobs_status_expires_at", "status", "expires_at")
+                      )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     operation = Column(
@@ -47,6 +49,15 @@ class Job(Base):
         nullable=False,
         default=JobStatus.QUEUED,
     )
+
+    worker_id = Column(UUID(as_uuid=True), nullable = True)
+    expires_at = Column(DataTime(timezone=True), nullable = True)
+    retry_count = Column(Integer, nullable = False, Default = 0)
+    max_retries = Column(Integer, nullable = False, default =3)
+
+
+
+
     result_dataset_id = Column(UUID(as_uuid=True), nullable=True)
     error_message = Column(String, nullable=True)
     created_at = Column(
