@@ -530,13 +530,3 @@ def create_dataset_nearest_feature(
     }
 
 
-"""
-The next step is the worker layer:
-
-claim queued jobs
-execute the operation
-save result dataset
-update status to succeeded/failed
-
-
-"""
