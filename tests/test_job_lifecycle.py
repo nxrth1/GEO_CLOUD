@@ -179,11 +179,13 @@ def test_worker_executes_claimed_job_and_marks_success(monkeypatch):
     monkeypatch.setattr(worker, "claim_next_job", lambda claimed_by: job_data)
     monkeypatch.setattr(worker, "heartbeat_context", lambda *args: nullcontext())
     monkeypatch.setattr(worker, "execute_job", lambda data: {"result": True})
-    monkeypatch.setattr(
-        worker,
-        "save_job_result",
-        lambda result, owner_id: result_dataset_id,
-    )
+    saved_result_owners = []
+
+    def save_result(result, owner_id):
+        saved_result_owners.append(owner_id)
+        return result_dataset_id
+
+    monkeypatch.setattr(worker, "save_job_result", save_result)
     monkeypatch.setattr(
         worker,
         "mark_succeeded",
@@ -192,6 +194,7 @@ def test_worker_executes_claimed_job_and_marks_success(monkeypatch):
 
     assert worker.process_next_job(worker_id) is True
     assert calls == [("succeeded", (job_id, worker_id, result_dataset_id))]
+    assert saved_result_owners == ["test-owner"]
 
 
 def test_worker_schedules_retry_for_execution_failure(monkeypatch):

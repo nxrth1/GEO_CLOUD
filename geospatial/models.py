@@ -2,7 +2,17 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Enum, Index, Integer, String, text
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Enum,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from .database import Base
 
@@ -13,7 +23,10 @@ def _enum_values(enum_class):
 
 class Dataset(Base):
     __tablename__ = "datasets"
-    __table_args__ = (Index("ix_datasets_owner_id", "owner_id"),)
+    __table_args__ = (
+        Index("ix_datasets_owner_id", "owner_id"),
+        UniqueConstraint("id", "owner_id", name="uq_datasets_id_owner"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id = Column(String(255), nullable=False)
@@ -39,11 +52,33 @@ class JobStatus(str, enum.Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 
+
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_status_created_at", "status", "created_at"),
         Index("ix_jobs_status_expires_at", "status", "expires_at"),
+        ForeignKeyConstraint(
+            ["source_dataset_id", "owner_id"],
+            ["datasets.id", "datasets.owner_id"],
+            name="fk_jobs_source_dataset_owner",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["secondary_dataset_id", "owner_id"],
+            ["datasets.id", "datasets.owner_id"],
+            name="fk_jobs_secondary_dataset_owner",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["result_dataset_id", "owner_id"],
+            ["datasets.id", "datasets.owner_id"],
+            name="fk_jobs_result_dataset_owner",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

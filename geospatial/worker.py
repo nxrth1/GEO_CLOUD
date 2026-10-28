@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from .database import SessionLocal
 from .datasets import load_dataset
-from .dataset_repository import save_owned_dataset
+from .dataset_repository import get_owned_dataset, save_owned_dataset
 from .models import Job, JobOperation, JobStatus
 from .mechanics import (
     _mark_succeeded,
@@ -25,11 +25,39 @@ from .operations import (
 from .processes import validate_json
 
 
+def _load_job_dataset(session, dataset_id, owner_id, field_name):
+    """Load an input only when its persisted owner matches the job owner."""
+    if dataset_id is None:
+        raise ValueError(f"The job {field_name.lower()} dataset is unavailable.")
+
+    try:
+        dataset_uuid = (
+            dataset_id if isinstance(dataset_id, UUID) else UUID(str(dataset_id))
+        )
+    except (TypeError, ValueError, AttributeError) as error:
+        raise ValueError(
+            f"The job {field_name.lower()} dataset is unavailable."
+        ) from error
+
+    dataset_record = get_owned_dataset(session, dataset_uuid, owner_id)
+    if dataset_record is None:
+        # Deliberately avoid exposing whether an ID exists under another owner.
+        raise ValueError(
+            f"The job {field_name.lower()} dataset is unavailable to its owner."
+        )
+
+    try:
+        return load_dataset(dataset_uuid)
+    except (OSError, ValueError) as error:
+        raise ValueError(
+            f"The job {field_name.lower()} dataset could not be read."
+        ) from error
+
+
 def execute_job(job_data):
-    source = load_dataset(job_data["source_dataset_id"])
-    validation = validate_json(source)
-    if not validation["accepted"]:
-        raise ValueError(f"Source dataset failed validation: {validation['issues']}")
+    owner_id = job_data.get("owner_id")
+    if not isinstance(owner_id, str) or not owner_id or len(owner_id) > 255:
+        raise ValueError("Job has no valid persisted owner.")
 
     try:
         operation = JobOperation(job_data["operation"])
@@ -40,12 +68,28 @@ def execute_job(job_data):
     if not isinstance(parameters, dict):
         raise TypeError("Job parameters must be an object.")
 
-    def load_secondary_dataset(field_name):
-        secondary_dataset_id = job_data.get("secondary_dataset_id")
-        if secondary_dataset_id is None:
-            raise ValueError(f"The {operation.value} operation requires a secondary dataset.")
+    # Validate ownership again at execution time. API checks alone are not enough
+    # because records may be changed manually or by future internal code.
+    with SessionLocal() as session:
+        source = _load_job_dataset(
+            session, job_data.get("source_dataset_id"), owner_id, "Source"
+        )
+        secondary_id = job_data.get("secondary_dataset_id")
+        secondary = None
+        if secondary_id is not None:
+            secondary = _load_job_dataset(
+                session, secondary_id, owner_id, "Secondary"
+            )
 
-        secondary = load_dataset(secondary_dataset_id)
+    validation = validate_json(source)
+    if not validation["accepted"]:
+        raise ValueError(f"Source dataset failed validation: {validation['issues']}")
+
+    def load_secondary_dataset(field_name):
+        if secondary is None:
+            raise ValueError(
+                f"The {operation.value} operation requires a secondary dataset."
+            )
         validation = validate_json(secondary)
         if not validation["accepted"]:
             raise ValueError(
@@ -97,6 +141,8 @@ def execute_job(job_data):
     raise ValueError(f"Unsupported operation: {operation.value}")
 
 def save_job_result(result, owner_id):
+    if not isinstance(owner_id, str) or not owner_id or len(owner_id) > 255:
+        raise ValueError("Cannot save a job result without a valid persisted owner.")
     with SessionLocal() as session:
         return save_owned_dataset(session, result, owner_id)
 

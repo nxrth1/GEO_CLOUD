@@ -67,6 +67,7 @@ def get_current_owner(
             algorithms=["RS256"],
             audience=audience,
             issuer=issuer,
+            options={"require": ["exp", "iss", "aud", "sub"]},
         )
     except jwt.InvalidTokenError as error:
         raise HTTPException(

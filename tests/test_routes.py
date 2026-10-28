@@ -258,3 +258,72 @@ def test_production_dataset_endpoint_requires_a_bearer_token(
     response = client.get(f"/datasets/{uuid4()}")
 
     assert response.status_code == 401
+
+
+def test_job_creation_rejects_foreign_secondary_dataset(monkeypatch, job_db_override):
+    source_id = uuid4()
+    foreign_mask_id = uuid4()
+    owner_id = "auth0|owner-b"
+    dataset_owners = {source_id: owner_id, foreign_mask_id: "auth0|owner-a"}
+    valid_geojson = collection({"type": "Point", "coordinates": [0, 0]})
+    read_ids = []
+
+    previous_owner_override = app.dependency_overrides.get(routes.get_current_owner)
+    app.dependency_overrides[routes.get_current_owner] = lambda: owner_id
+    try:
+        monkeypatch.setattr(
+            routes,
+            "get_owned_dataset",
+            lambda db, dataset_id, requested_owner: (
+                SimpleNamespace(id=dataset_id)
+                if dataset_owners.get(dataset_id) == requested_owner
+                else None
+            ),
+        )
+        monkeypatch.setattr(
+            routes,
+            "load_dataset",
+            lambda dataset_id: read_ids.append(dataset_id) or valid_geojson,
+        )
+        response = client.post(
+            "/jobs",
+            json={
+                "operation": "clip",
+                "source_dataset_id": str(source_id),
+                "secondary_dataset_id": str(foreign_mask_id),
+                "parameters": {"analysis_crs": "EPSG:32637"},
+            },
+        )
+    finally:
+        if previous_owner_override is None:
+            app.dependency_overrides.pop(routes.get_current_owner, None)
+        else:
+            app.dependency_overrides[routes.get_current_owner] = previous_owner_override
+
+    assert response.status_code == 404
+    assert read_ids == [source_id]
+
+
+def test_dataset_access_is_scoped_to_authenticated_owner(monkeypatch, job_db_override):
+    owner_id = "auth0|owner-b"
+    foreign_dataset_id = uuid4()
+
+    previous_owner_override = app.dependency_overrides.get(routes.get_current_owner)
+    app.dependency_overrides[routes.get_current_owner] = lambda: owner_id
+    try:
+        monkeypatch.setattr(routes, "get_owned_dataset", lambda *args: None)
+        monkeypatch.setattr(
+            routes,
+            "load_dataset",
+            lambda *_: (_ for _ in ()).throw(
+                AssertionError("Foreign dataset files must not be read.")
+            ),
+        )
+        response = client.get(f"/datasets/{foreign_dataset_id}")
+    finally:
+        if previous_owner_override is None:
+            app.dependency_overrides.pop(routes.get_current_owner, None)
+        else:
+            app.dependency_overrides[routes.get_current_owner] = previous_owner_override
+
+    assert response.status_code == 404

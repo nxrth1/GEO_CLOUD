@@ -93,3 +93,23 @@ def test_current_owner_requires_auth0_configuration_outside_development(
         auth.get_current_owner(None)
 
     assert error.value.status_code == 503
+
+
+def test_current_owner_rejects_access_token_without_expiry_claim(
+    auth0_keys_and_settings,
+):
+    token = access_token(auth0_keys_and_settings)
+    claims = jwt.decode(
+        token,
+        options={"verify_signature": False, "verify_exp": False},
+        algorithms=["RS256"],
+    )
+    claims.pop("exp")
+    token_without_expiry = jwt.encode(
+        claims, auth0_keys_and_settings, algorithm="RS256"
+    )
+
+    with pytest.raises(HTTPException) as error:
+        auth.get_current_owner(credentials(token_without_expiry))
+
+    assert error.value.status_code == 401
