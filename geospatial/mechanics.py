@@ -82,6 +82,7 @@ def claim_next_job(worker_id: UUID | None = None):
         _mark_running(job, worker_id, now)
         return {
             "id": job.id,
+            "owner_id": job.owner_id,
             "worker_id": worker_id,
             "operation": job.operation,
             "source_dataset_id": job.source_dataset_id,

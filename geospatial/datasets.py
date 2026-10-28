@@ -39,3 +39,8 @@ def save_dataset(geojson):
 def load_dataset(dataset_id: UUID):
     path = _dataset_directory() / f"{dataset_id}.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def delete_dataset(dataset_id: UUID) -> None:
+    path = _dataset_directory() / f"{dataset_id}.json"
+    path.unlink(missing_ok=True)

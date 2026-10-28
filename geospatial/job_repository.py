@@ -10,11 +10,13 @@ def create_queued_job(
     session: Session,
     *,
     operation: JobOperation,
+    owner_id: str,
     source_dataset_id: UUID,
     parameters: dict[str, Any],
     secondary_dataset_id: UUID | None = None,
 ) -> Job:
     job = Job(
+        owner_id=owner_id,
         operation=operation,
         source_dataset_id=source_dataset_id,
         secondary_dataset_id=secondary_dataset_id,
@@ -26,5 +28,7 @@ def create_queued_job(
     return job
 
 
-def get_job(session: Session, job_id: UUID) -> Job | None:
-    return session.get(Job, job_id)
+def get_job(session: Session, job_id: UUID, owner_id: str) -> Job | None:
+    return session.execute(
+        select(Job).where(Job.id == job_id, Job.owner_id == owner_id)
+    ).scalar_one_or_none()

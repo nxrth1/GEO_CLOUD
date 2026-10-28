@@ -5,7 +5,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 
 from .database import SessionLocal
-from .datasets import load_dataset, save_dataset
+from .datasets import load_dataset
+from .dataset_repository import save_owned_dataset
 from .models import Job, JobOperation, JobStatus
 from .mechanics import (
     _mark_succeeded,
@@ -95,8 +96,9 @@ def execute_job(job_data):
 
     raise ValueError(f"Unsupported operation: {operation.value}")
 
-def save_job_result(result):
-    return save_dataset(result)
+def save_job_result(result, owner_id):
+    with SessionLocal() as session:
+        return save_owned_dataset(session, result, owner_id)
 
 
 def _get_running_job(session, job_id, worker_id):
@@ -135,7 +137,7 @@ def process_next_job(worker_id: UUID | None = None):
     try:
         with heartbeat_context(SessionLocal, job_data["id"], worker_id):
             result = execute_job(job_data)
-            result_dataset_id = save_job_result(result)
+            result_dataset_id = save_job_result(result, job_data["owner_id"])
             mark_succeeded(job_data["id"], worker_id, result_dataset_id)
     except Exception as error:
         mark_failed(job_data["id"], worker_id, str(error))
@@ -156,9 +158,6 @@ if __name__ == "__main__":
 
 
 """
-Kindly, here’s what I’d implement next, in priority order. You already have GeoJSON validation, several spatial operations, dataset save/load, and queued jobs with a worker. The project outline in .txt describes a bigger platform, so I’d build toward it in small steps rather than reorganizing everything at once.
-
-Make jobs reliable. A job can stay running if the worker crashes. Add a worker heartbeat or job lease, recovery for stale jobs, and a clear retry policy. Test the full lifecycle: queued → running → succeeded or failed.
 Validate jobs before accepting them. Check that each operation has the required parameters and any required secondary dataset before creating a job. That way, bad jobs return a useful 422 immediately instead of failing later in the worker.
 Add dataset ownership and access control. The current dataset IDs are not tied to users or tenants. Before making the API available beyond trusted local use, add authentication and ensure users can only access their own datasets and jobs.
 Improve dataset management. Add listing and deletion, record dataset metadata, and define how uploads, size limits, and storage work. The current implementation stores GeoJSON files locally; a storage interface would make a later move to object storage easier.

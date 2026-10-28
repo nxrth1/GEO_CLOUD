@@ -18,6 +18,7 @@ from geospatial.models import JobStatus
 
 def job(**overrides):
     values = {
+        "owner_id": "test-owner",
         "status": JobStatus.QUEUED,
         "worker_id": None,
         "started_at": None,
@@ -172,13 +173,17 @@ def test_worker_executes_claimed_job_and_marks_success(monkeypatch):
     worker_id = uuid4()
     job_id = uuid4()
     result_dataset_id = uuid4()
-    job_data = {"id": job_id}
+    job_data = {"id": job_id, "owner_id": "test-owner"}
     calls = []
 
     monkeypatch.setattr(worker, "claim_next_job", lambda claimed_by: job_data)
     monkeypatch.setattr(worker, "heartbeat_context", lambda *args: nullcontext())
     monkeypatch.setattr(worker, "execute_job", lambda data: {"result": True})
-    monkeypatch.setattr(worker, "save_job_result", lambda result: result_dataset_id)
+    monkeypatch.setattr(
+        worker,
+        "save_job_result",
+        lambda result, owner_id: result_dataset_id,
+    )
     monkeypatch.setattr(
         worker,
         "mark_succeeded",
@@ -192,7 +197,7 @@ def test_worker_executes_claimed_job_and_marks_success(monkeypatch):
 def test_worker_schedules_retry_for_execution_failure(monkeypatch):
     worker_id = uuid4()
     job_id = uuid4()
-    job_data = {"id": job_id}
+    job_data = {"id": job_id, "owner_id": "test-owner"}
     calls = []
 
     monkeypatch.setattr(worker, "claim_next_job", lambda claimed_by: job_data)

@@ -11,6 +11,19 @@ def _enum_values(enum_class):
     return [member.value for member in enum_class]
 
 
+class Dataset(Base):
+    __tablename__ = "datasets"
+    __table_args__ = (Index("ix_datasets_owner_id", "owner_id"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(String(255), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class JobOperation(str, enum.Enum):
     BUFFER = "buffer"
     CLIP = "clip"
@@ -34,6 +47,7 @@ class Job(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(String(255), nullable=False)
     operation = Column(
         Enum(JobOperation, values_callable=_enum_values, name="joboperation"),
         nullable=False,
