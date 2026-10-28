@@ -238,6 +238,8 @@ def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
         "result_dataset_id": str(job.result_dataset_id) if job.result_dataset_id else None,
         "parameters": job.parameters,
         "error_message": job.error_message,
+        "retry_count": job.retry_count,
+        "max_retries": job.max_retries,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "started_at": job.started_at.isoformat() if job.started_at else None,
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
@@ -528,5 +530,4 @@ def create_dataset_nearest_feature(
         "id": str(result_id),
         "validation": {"source": validation, "target": target_validation},
     }
-
 

@@ -1,11 +1,18 @@
 import time
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
 from .database import SessionLocal
 from .datasets import load_dataset, save_dataset
 from .models import Job, JobOperation, JobStatus
+from .mechanics import (
+    _mark_succeeded,
+    _schedule_retry_or_fail,
+    claim_next_job,
+    heartbeat_context,
+)
 from .operations import (
     buffer,
     clip,
@@ -15,32 +22,6 @@ from .operations import (
     spatial_join,
 )
 from .processes import validate_json
-
-
-def claim_next_job():
-    with SessionLocal.begin() as session:
-        job = session.execute(
-            select(Job)
-            .where(Job.status == JobStatus.QUEUED)
-            .order_by(Job.created_at, Job.id)
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        ).scalar_one_or_none()
-
-        if job is None:
-            return None
-
-        job.status = JobStatus.RUNNING
-        job.started_at = datetime.now(timezone.utc)
-        job_data = {
-            "id": job.id,
-            "operation": job.operation,
-            "source_dataset_id": job.source_dataset_id,
-            "secondary_dataset_id": job.secondary_dataset_id,
-            "parameters": job.parameters,
-        }
-
-    return job_data
 
 
 def execute_job(job_data):
@@ -118,54 +99,55 @@ def save_job_result(result):
     return save_dataset(result)
 
 
-def _get_running_job(session, job_id):
+def _get_running_job(session, job_id, worker_id):
     job = session.execute(
-        select(Job).where(Job.id == job_id).with_for_update()
+        select(Job)
+        .where(
+            Job.id == job_id,
+            Job.worker_id == worker_id,
+            Job.status == JobStatus.RUNNING,
+        )
+        .with_for_update()
     ).scalar_one_or_none()
     if job is None:
-        raise LookupError(f"Job {job_id} was not found.")
-    if job.status != JobStatus.RUNNING:
-        raise ValueError(f"Job {job_id} is not running.")
+        raise ValueError(f"Worker no longer owns running job {job_id}.")
     return job
 
 
-def mark_succeeded(job_id, result_dataset_id):
+def mark_succeeded(job_id, worker_id, result_dataset_id):
     with SessionLocal.begin() as session:
-        job = _get_running_job(session, job_id)
-        job.status = JobStatus.SUCCEEDED
-        job.result_dataset_id = result_dataset_id
-        job.error_message = None
-        job.finished_at = datetime.now(timezone.utc)
+        job = _get_running_job(session, job_id, worker_id)
+        _mark_succeeded(job, result_dataset_id, datetime.now(timezone.utc))
 
 
-def mark_failed(job_id, message):
+def mark_failed(job_id, worker_id, message):
     with SessionLocal.begin() as session:
-        job = _get_running_job(session, job_id)
-        job.status = JobStatus.FAILED
-        job.result_dataset_id = None
-        job.error_message = str(message)
-        job.finished_at = datetime.now(timezone.utc)
+        job = _get_running_job(session, job_id, worker_id)
+        _schedule_retry_or_fail(job, datetime.now(timezone.utc), str(message))
 
 
-def process_next_job():
-    job_data = claim_next_job()
+def process_next_job(worker_id: UUID | None = None):
+    worker_id = worker_id or uuid4()
+    job_data = claim_next_job(worker_id)
     if job_data is None:
         return False
 
     try:
-        result = execute_job(job_data)
-        result_dataset_id = save_job_result(result)
+        with heartbeat_context(SessionLocal, job_data["id"], worker_id):
+            result = execute_job(job_data)
+            result_dataset_id = save_job_result(result)
+            mark_succeeded(job_data["id"], worker_id, result_dataset_id)
     except Exception as error:
-        mark_failed(job_data["id"], str(error))
+        mark_failed(job_data["id"], worker_id, str(error))
         return True
 
-    mark_succeeded(job_data["id"], result_dataset_id)
     return True
 
 
 def run_worker(poll_interval=1.0):
+    worker_id = uuid4()
     while True:
-        if not process_next_job():
+        if not process_next_job(worker_id):
             time.sleep(poll_interval)
 
 
