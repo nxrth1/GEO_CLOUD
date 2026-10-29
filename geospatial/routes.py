@@ -1,9 +1,11 @@
 import json
 import math
+import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from pyproj import CRS
 from pyproj.exceptions import CRSError
@@ -11,8 +13,28 @@ from sqlalchemy.orm import Session
 
 from .auth import get_current_owner
 from .database import SessionLocal
-from .dataset_repository import get_owned_dataset, save_owned_dataset
-from .datasets import load_dataset
+from .dataset_repository import (
+    get_owned_dataset,
+    get_owned_datasets_for_update,
+    list_owned_datasets,
+    mark_dataset_storage_deleted,
+    save_owned_dataset,
+    soft_delete_owned_dataset,
+)
+from .datasets import delete_dataset, load_dataset
+from .dataset_api import (
+    InvalidDatasetCursor,
+    dataset_metadata_response,
+    decode_dataset_cursor,
+    encode_dataset_cursor,
+)
+from .dataset_service import (
+    DatasetTooLargeError,
+    DatasetUploadError,
+    DatasetValidationError,
+    create_dataset_from_geojson,
+    create_dataset_from_upload,
+)
 from .job_repository import create_queued_job, get_job
 from .models import JobOperation
 from .operations import (
@@ -27,6 +49,7 @@ from .processes import validate_json
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_db():
@@ -37,21 +60,36 @@ def get_db():
         db.close()
 
 
+def _load_dataset_record(record, *, not_found_detail: str = "Dataset not found."):
+    try:
+        backend = getattr(record, "storage_backend", None)
+        storage_key = getattr(record, "storage_key", None)
+        if backend and storage_key:
+            return load_dataset(record.id, storage_backend=backend, storage_key=storage_key)
+        # Compatibility for older callers/tests and rows from before metadata backfill.
+        return load_dataset(record.id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=not_found_detail) from error
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        raise HTTPException(status_code=500, detail="Could not read dataset.") from error
+
+
 def _load_owned_dataset(
     db: Session,
     dataset_id: UUID,
     owner_id: str,
     *,
     not_found_detail: str = "Dataset not found.",
+    for_update: bool = False,
 ):
-    if get_owned_dataset(db, dataset_id, owner_id) is None:
+    record = (
+        get_owned_dataset(db, dataset_id, owner_id, for_update=True)
+        if for_update
+        else get_owned_dataset(db, dataset_id, owner_id)
+    )
+    if record is None:
         raise HTTPException(status_code=404, detail=not_found_detail)
-    try:
-        return load_dataset(dataset_id)
-    except FileNotFoundError as error:
-        raise HTTPException(status_code=404, detail=not_found_detail) from error
-    except (OSError, json.JSONDecodeError) as error:
-        raise HTTPException(status_code=500, detail="Could not read dataset.") from error
+    return _load_dataset_record(record, not_found_detail=not_found_detail)
 
 
 def _validate_geojson(data, *, field_name="geojson"):
@@ -193,6 +231,7 @@ class NearestFeatureRequest(BaseModel):
 
 class DatasetRequest(BaseModel):
     geojson: dict[str, Any]
+    name: str | None = Field(default=None, max_length=255)
 
 
 class JobCreateRequest(BaseModel):
@@ -334,20 +373,26 @@ def create_job(
         request.secondary_dataset_id,
     )
 
-    source_dataset = _load_owned_dataset(
-        db,
-        request.source_dataset_id,
-        owner_id,
-        not_found_detail="Source dataset not found.",
+    # Lock all input records in deterministic UUID order. Dataset deletion takes
+    # the same row locks, preventing a delete/job-creation race.
+    input_ids = [request.source_dataset_id]
+    if request.secondary_dataset_id is not None:
+        input_ids.append(request.secondary_dataset_id)
+    records_by_id = get_owned_datasets_for_update(db, input_ids, owner_id)
+    source_record = records_by_id.get(request.source_dataset_id)
+    if source_record is None:
+        raise HTTPException(status_code=404, detail="Source dataset not found.")
+    source_dataset = _load_dataset_record(
+        source_record, not_found_detail="Source dataset not found."
     )
     _validate_geojson(source_dataset, field_name="Source dataset")
 
     if request.secondary_dataset_id is not None:
-        secondary_dataset = _load_owned_dataset(
-            db,
-            request.secondary_dataset_id,
-            owner_id,
-            not_found_detail="Secondary dataset not found.",
+        secondary_record = records_by_id.get(request.secondary_dataset_id)
+        if secondary_record is None:
+            raise HTTPException(status_code=404, detail="Secondary dataset not found.")
+        secondary_dataset = _load_dataset_record(
+            secondary_record, not_found_detail="Secondary dataset not found."
         )
         _validate_geojson(secondary_dataset, field_name="Secondary dataset")
 
@@ -396,30 +441,142 @@ def get_job_status(
     }
 
 
+def _upload_error_response(error: Exception):
+    if isinstance(error, DatasetTooLargeError):
+        return HTTPException(status_code=413, detail=str(error))
+    if isinstance(error, DatasetValidationError):
+        return HTTPException(
+            status_code=422,
+            detail={
+                "message": "Dataset failed critical validation rules.",
+                "validation": error.validation,
+            },
+        )
+    if isinstance(error, DatasetUploadError):
+        return HTTPException(status_code=422, detail=str(error))
+    return HTTPException(status_code=500, detail="Could not save dataset.")
+
+
 @router.post("/datasets", status_code=201)
 def create_dataset(
     request: DatasetRequest,
     db: Session = Depends(get_db),
     owner_id: str = Depends(get_current_owner),
 ):
-    validation = _validate_geojson(request.geojson)
     try:
-        dataset_id = save_owned_dataset(db, request.geojson, owner_id)
+        record, validation, _ = create_dataset_from_geojson(
+            db, request.geojson, owner_id, name=request.name
+        )
+    except (DatasetTooLargeError, DatasetValidationError, DatasetUploadError) as error:
+        raise _upload_error_response(error) from error
     except OSError as error:
+        raise HTTPException(status_code=500, detail="Could not save dataset.") from error
+    return {**dataset_metadata_response(record), "validation": validation}
+
+
+@router.post("/datasets/upload", status_code=201)
+def upload_dataset(
+    file: UploadFile = File(...),
+    name: str | None = Form(default=None, max_length=255),
+    db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_owner),
+):
+    try:
+        record, validation = create_dataset_from_upload(
+            db,
+            file.file,
+            owner_id,
+            name=name,
+            original_filename=file.filename,
+        )
+    except (DatasetTooLargeError, DatasetValidationError, DatasetUploadError) as error:
+        raise _upload_error_response(error) from error
+    except OSError as error:
+        raise HTTPException(status_code=500, detail="Could not save dataset.") from error
+    finally:
+        file.file.close()
+    return {**dataset_metadata_response(record), "validation": validation}
+
+
+@router.get("/datasets")
+def list_datasets(
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=2048),
+    db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_owner),
+):
+    try:
+        decoded_cursor = decode_dataset_cursor(cursor)
+    except InvalidDatasetCursor as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    before_created_at, before_id = decoded_cursor or (None, None)
+    records, has_more = list_owned_datasets(
+        db,
+        owner_id,
+        limit=limit,
+        before_created_at=before_created_at,
+        before_id=before_id,
+    )
+    next_cursor = encode_dataset_cursor(records[-1]) if has_more and records else None
+    return {
+        "items": [dataset_metadata_response(record) for record in records],
+        "next_cursor": next_cursor,
+    }
+
+
+@router.get("/datasets/{dataset_id}/metadata")
+def get_dataset_metadata(
+    dataset_id: UUID,
+    db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_owner),
+):
+    record = get_owned_dataset(db, dataset_id, owner_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    return dataset_metadata_response(record)
+
+
+@router.delete("/datasets/{dataset_id}")
+def delete_owned_dataset_route(
+    dataset_id: UUID,
+    db: Session = Depends(get_db),
+    owner_id: str = Depends(get_current_owner),
+):
+    record, deleted = soft_delete_owned_dataset(db, dataset_id, owner_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    if not deleted:
         raise HTTPException(
-            status_code=500,
-            detail="Could not save dataset.",
-        ) from error
+            status_code=409,
+            detail="Dataset is currently used by a queued or running job.",
+        )
 
-    return {"id": str(dataset_id), "validation": validation}
+    backend = getattr(record, "storage_backend", "local")
+    storage_key = getattr(record, "storage_key", None) or f"{record.id}.json"
+    try:
+        delete_dataset(
+            record.id,
+            storage_backend=backend,
+            storage_key=storage_key,
+        )
+    except Exception:
+        logger.exception("Dataset marked deleted but storage cleanup is pending: %s", record.id)
+        return JSONResponse(
+            status_code=202,
+            content={"id": str(record.id), "status": "deleted_cleanup_pending"},
+        )
 
-@router.post("/dataset/upload")
-def upload_dataset:
-pass
-
-@router.get("/dataset/upload")
-def get_upload_dataset:
-pass
+    try:
+        mark_dataset_storage_deleted(db, record.id, backend, storage_key)
+    except Exception:
+        # The file is gone, and the worker can safely retry the idempotent delete
+        # and record completion in PostgreSQL.
+        logger.exception("Dataset storage removed; cleanup marker update is pending: %s", record.id)
+        return JSONResponse(
+            status_code=202,
+            content={"id": str(record.id), "status": "deleted_cleanup_pending"},
+        )
+    return Response(status_code=204)
 
 
 @router.get("/datasets/{dataset_id}")
@@ -429,17 +586,7 @@ def get_dataset(
     owner_id: str = Depends(get_current_owner),
 ):
     geojson = _load_owned_dataset(db, dataset_id, owner_id)
-
     return {"id": str(dataset_id), "geojson": geojson}
-
-@router.get("/dataset/{dataset_id}/metadata")
-def get_dataset_metadata:
-pass
-
-
-@router.delete("/dataset/{dataset_id}}")
-def delete_dataset:
-pass
 
 
 @router.post("/nearest_feature")

@@ -1,13 +1,14 @@
 import time
+import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
 from .database import SessionLocal
-from .datasets import load_dataset
+from .datasets import delete_dataset, load_dataset
 from .dataset_repository import get_owned_dataset, save_owned_dataset
-from .models import Job, JobOperation, JobStatus
+from .models import Dataset, Job, JobOperation, JobStatus
 from .mechanics import (
     _mark_succeeded,
     _schedule_retry_or_fail,
@@ -23,6 +24,8 @@ from .operations import (
     spatial_join,
 )
 from .processes import validate_json
+
+logger = logging.getLogger(__name__)
 
 
 def _load_job_dataset(session, dataset_id, owner_id, field_name):
@@ -47,6 +50,12 @@ def _load_job_dataset(session, dataset_id, owner_id, field_name):
         )
 
     try:
+        backend = getattr(dataset_record, "storage_backend", None)
+        storage_key = getattr(dataset_record, "storage_key", None)
+        if backend and storage_key:
+            return load_dataset(
+                dataset_uuid, storage_backend=backend, storage_key=storage_key
+            )
         return load_dataset(dataset_uuid)
     except (OSError, ValueError) as error:
         raise ValueError(
@@ -192,10 +201,45 @@ def process_next_job(worker_id: UUID | None = None):
     return True
 
 
+def process_pending_dataset_cleanup(limit: int = 10) -> int:
+    """Retry physical deletion for soft-deleted datasets whose cleanup is pending."""
+    cleaned = 0
+    for _ in range(max(1, limit)):
+        try:
+            with SessionLocal.begin() as session:
+                record = session.execute(
+                    select(Dataset)
+                    .where(
+                        Dataset.deleted_at.is_not(None),
+                        Dataset.storage_deleted_at.is_(None),
+                    )
+                    .order_by(Dataset.deleted_at, Dataset.id)
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                ).scalar_one_or_none()
+                if record is None:
+                    break
+                # DatasetStorage.delete is defined to be idempotent, including when
+                # an earlier attempt removed the object but failed to update the DB.
+                delete_dataset(
+                    record.id,
+                    storage_backend=record.storage_backend,
+                    storage_key=record.storage_key,
+                )
+                record.storage_deleted_at = datetime.now(timezone.utc)
+            cleaned += 1
+        except Exception:
+            logger.exception("Dataset storage cleanup attempt failed; it will be retried.")
+            break
+    return cleaned
+
+
 def run_worker(poll_interval=1.0):
     worker_id = uuid4()
     while True:
-        if not process_next_job(worker_id):
+        did_work = process_next_job(worker_id)
+        process_pending_dataset_cleanup()
+        if not did_work:
             time.sleep(poll_interval)
 
 
@@ -204,6 +248,8 @@ if __name__ == "__main__":
 
 
 """
+Validate jobs before accepting them. Check that each operation has the required parameters and any required secondary dataset before creating a job. That way, bad jobs return a useful 422 immediately instead of failing later in the worker.
+Add dataset ownership and access control. The current dataset IDs are not tied to users or tenants. Before making the API available beyond trusted local use, add authentication and ensure users can only access their own datasets and jobs.
 Improve dataset management. Add listing and deletion, record dataset metadata, and define how uploads, size limits, and storage work. The current implementation stores GeoJSON files locally; a storage interface would make a later move to object storage easier.
 Add basic operational support. Provide health/readiness checks, configurable CORS and settings, structured logs, and deployment setup for running the API and worker together.
 Expand tests around the service lifecycle. Prioritize job recovery, dataset persistence, authorization boundaries, invalid job requests, and API error responses.

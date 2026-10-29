@@ -612,7 +612,9 @@ def validate_json(
             "message": "Validation configuration is invalid."
         }
 
-    if isinstance(geo_path, dict):
+    if isinstance(geo_path, dict) or not isinstance(geo_path, (str, Path)):
+        # API callers may provide any decoded JSON value. Treat arrays, strings,
+        # numbers and null as malformed GeoJSON instead of passing them to Path().
         data = geo_path
     else:
         path = Path(geo_path)

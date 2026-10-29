@@ -17,3 +17,11 @@ FastAPI-based geospatial processing API with a PostgreSQL-backed job queue and a
 5. Run the tests with `pytest`.
 
 Read [Authentication and resource ownership](docs/ownership-and-authentication.md) before exposing the service beyond isolated local development. In particular, `GEO_CLOUD_ENV=development` shares one development owner across all local requests and must not be used for a network-accessible deployment.
+
+## Dataset management
+
+Dataset listing, metadata, bounded JSON/multipart uploads, soft deletion, and the storage
+adapter are documented in [`docs/dataset-management.md`](docs/dataset-management.md).
+Configure `GEO_CLOUD_STORAGE_BACKEND=local` and `GEO_CLOUD_MAX_UPLOAD_BYTES=26214400`.
+After applying migrations, run `python -m geospatial.backfill_dataset_metadata` and review
+its report before relying on the enriched metadata for existing datasets.

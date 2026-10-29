@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import router
+from .request_limits import RequestBodyLimitMiddleware
 
 
 app = FastAPI(
@@ -24,6 +25,9 @@ origins = (
     ]
 )
 
+# Register the body-limit middleware first so CORS wraps it and browser clients
+# receive CORS headers even when an oversized request is rejected.
+app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,

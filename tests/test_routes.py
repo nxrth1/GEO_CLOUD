@@ -154,7 +154,7 @@ def test_job_creation_cannot_use_another_owners_dataset(monkeypatch, job_db_over
     def unexpected_load(*args, **kwargs):
         raise AssertionError("A foreign dataset must not be read.")
 
-    monkeypatch.setattr(routes, "get_owned_dataset", lambda *args: None)
+    monkeypatch.setattr(routes, "get_owned_datasets_for_update", lambda *args: {})
     monkeypatch.setattr(routes, "load_dataset", unexpected_load)
     response = client.post(
         "/jobs",
@@ -185,8 +185,10 @@ def test_job_creation_accepts_valid_request_and_persists_queued_job(
     monkeypatch.setattr(routes, "load_dataset", lambda dataset_id: valid_geojson)
     monkeypatch.setattr(
         routes,
-        "get_owned_dataset",
-        lambda db, dataset_id, owner_id: SimpleNamespace(id=dataset_id),
+        "get_owned_datasets_for_update",
+        lambda db, dataset_ids, owner_id: {
+            dataset_id: SimpleNamespace(id=dataset_id) for dataset_id in dataset_ids
+        },
     )
     monkeypatch.setattr(
         routes,
@@ -227,18 +229,40 @@ def test_dataset_cannot_be_read_without_matching_owner(
 def test_dataset_creation_saves_the_current_owner(monkeypatch, job_db_override):
     saved_owners = []
     dataset_id = uuid4()
+    valid_geojson = collection({"type": "Point", "coordinates": [0, 0]})
+    now = "2026-10-29T09:00:00+00:00"
+    record = SimpleNamespace(
+        id=dataset_id,
+        name="Nairobi points",
+        original_filename=None,
+        format="geojson",
+        content_type="application/geo+json",
+        size_bytes=100,
+        sha256="a" * 64,
+        feature_count=1,
+        geometry_types=["Point"],
+        bbox=[0, 0, 0, 0],
+        crs="OGC:CRS84",
+        created_at=__import__("datetime").datetime.fromisoformat(now),
+        deleted_at=None,
+    )
     monkeypatch.setattr(
         routes,
-        "save_owned_dataset",
-        lambda db, geojson, owner_id: saved_owners.append(owner_id) or dataset_id,
+        "create_dataset_from_geojson",
+        lambda db, geojson, owner_id, name=None: (
+            saved_owners.append(owner_id) or record,
+            {"accepted": True},
+            100,
+        ),
     )
     response = client.post(
         "/datasets",
-        json={"geojson": collection({"type": "Point", "coordinates": [0, 0]})},
+        json={"geojson": valid_geojson, "name": "Nairobi points"},
     )
 
     assert response.status_code == 201
     assert response.json()["id"] == str(dataset_id)
+    assert response.json()["name"] == "Nairobi points"
     assert saved_owners == [routes.get_current_owner()]
 
 
@@ -273,12 +297,12 @@ def test_job_creation_rejects_foreign_secondary_dataset(monkeypatch, job_db_over
     try:
         monkeypatch.setattr(
             routes,
-            "get_owned_dataset",
-            lambda db, dataset_id, requested_owner: (
-                SimpleNamespace(id=dataset_id)
+            "get_owned_datasets_for_update",
+            lambda db, dataset_ids, requested_owner: {
+                dataset_id: SimpleNamespace(id=dataset_id)
+                for dataset_id in dataset_ids
                 if dataset_owners.get(dataset_id) == requested_owner
-                else None
-            ),
+            },
         )
         monkeypatch.setattr(
             routes,
