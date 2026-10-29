@@ -413,6 +413,14 @@ def create_dataset(
 
     return {"id": str(dataset_id), "validation": validation}
 
+@router.post("/dataset/upload")
+def upload_dataset:
+pass
+
+@router.get("/dataset/upload")
+def get_upload_dataset:
+pass
+
 
 @router.get("/datasets/{dataset_id}")
 def get_dataset(
@@ -423,6 +431,15 @@ def get_dataset(
     geojson = _load_owned_dataset(db, dataset_id, owner_id)
 
     return {"id": str(dataset_id), "geojson": geojson}
+
+@router.get("/dataset/{dataset_id}/metadata")
+def get_dataset_metadata:
+pass
+
+
+@router.delete("/dataset/{dataset_id}}")
+def delete_dataset:
+pass
 
 
 @router.post("/nearest_feature")
