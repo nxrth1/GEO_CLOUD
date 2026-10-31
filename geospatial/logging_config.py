@@ -3,7 +3,6 @@ import json
 from datetime import datetime, timezone
 
 class JSONFormatter(logging.Formatter):
-    """Custom formatter to output logs as JSON."""
 
     def __init__(self, service_name):
         super().__init__()
@@ -31,10 +30,11 @@ class JSONFormatter(logging.Formatter):
             "request_id"
         ):
             value = getattr(record, field, None)
+#getattr(object, attribute_name, default_value)  
 
         # Inject contextual information if provided in the 'extra' dictionary
-        if value is not None:
-            log_record[field] = value
+            if value is not None:
+                log_record[field] = value
             
         # Include traceback details if an exception occurred
         if record.exc_info:
@@ -43,7 +43,7 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_record, default=str)
 
 def setup_logging(level=logging.INFO, service_name="api"):
-    """Configures the root logger with the JSON formatter."""
+
     logger = logging.getLogger()
     logger.setLevel(level)
     

@@ -1,5 +1,4 @@
 services:
-
   db:
     image: postgres:16
 
@@ -12,7 +11,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-gis_jobs}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-gis_jobs}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -36,7 +39,8 @@ services:
 
   api:
     build: .
-    command: ["uvicorn", "geospatial.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command:
+      ["uvicorn", "geospatial.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
     env_file:
       - .env
@@ -46,8 +50,8 @@ services:
       GEO_CLOUD_ENV: development
       GEO_CLOUD_DATASETS_DIR: /app/data/datasets
 
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
 
     volumes:
       - datasets:/app/data/datasets
@@ -62,6 +66,8 @@ services:
     build: .
     command: ["python", "-m", "geospatial.worker"]
 
+    stop_grace_period: 2m
+
     env_file:
       - .env
 
@@ -76,6 +82,20 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+    depends_on:
+      - api
 
     restart: unless-stopped
 

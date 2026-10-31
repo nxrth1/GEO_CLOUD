@@ -1,5 +1,6 @@
-import time
 import logging
+import signal
+from threading import Event
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -25,6 +26,9 @@ from .operations import (
 )
 from .processes import validate_json
 
+from .logging_config import setup_logging
+
+setup_logging(service_name="worker")
 logger = logging.getLogger(__name__)
 
 
@@ -236,11 +240,55 @@ def process_pending_dataset_cleanup(limit: int = 10) -> int:
 
 def run_worker(poll_interval=1.0):
     worker_id = uuid4()
-    while True:
-        did_work = process_next_job(worker_id)
-        process_pending_dataset_cleanup()
-        if not did_work:
-            time.sleep(poll_interval)
+
+    shutdown_event = Event()
+
+    def handle_shutdown(signum, frame):
+        logger.info(
+            "Worker shutdown requested",
+            extra={
+                "event": "worker_shutdown_requested",
+                "worker_id": str(worker_id),
+                "signal": signum
+            }
+        )
+
+        shutdown_event.set()
+
+    # Listen for operating system shutdown signals
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGINT, handle_shutdown)
+
+    logger.info(
+        "Worker started",
+        extra={
+            "event": "worker_started",
+            "worker_id": str(worker_id)
+        }
+    )
+
+    try:
+        while not shutdown_event.is_set():
+
+            did_work = process_next_job(worker_id)
+
+            # Don't start additional work after shutdown is requested
+            if shutdown_event.is_set():
+                break
+
+            process_pending_dataset_cleanup()
+
+            if not did_work:
+                shutdown_event.wait(poll_interval)
+
+    finally:
+        logger.info(
+            "Worker stopped",
+            extra={
+                "event": "worker_stopped",
+                "worker_id": str(worker_id)
+            }
+        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+Adjust the env file around the GEO_CLOUD_CORS_METHODS=GET,POST,PUT,PATCH,DELETE &
+GEO_CLOUD_CORS_HEADERS=Authorization,Content-Type,Accept
+
+Before creating the file, add these variables to your .env:
+POSTGRES_DB=gis_jobs
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=local-dev-change-this
