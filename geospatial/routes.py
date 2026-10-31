@@ -526,14 +526,31 @@ def list_datasets(
 
 @router.get("/datasets/{dataset_id}/metadata")
 def get_dataset_metadata(
+    owner_id: ,
     dataset_id: UUID,
+    redis_client: ,
     db: Session = Depends(get_db),
     owner_id: str = Depends(get_current_owner),
 ):
+
+    cache_key = f"dataset:{owner_id}:{dataset_id}"
+    cached = redis_client.get(cache_key)
+
+    if cached is not None:
+        return json.loads(cached)
+
     record = get_owned_dataset(db, dataset_id, owner_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Dataset not found.")
     return dataset_metadata_response(record)
+
+    metadata = dataset_metadata_response(record)
+
+    redis_client.set(
+        cache_key,
+        json.dumps(metadata),
+        ex=60
+    )
 
 
 @router.delete("/datasets/{dataset_id}")

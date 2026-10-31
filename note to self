@@ -5,3 +5,272 @@ Before creating the file, add these variables to your .env:
 POSTGRES_DB=gis_jobs
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=local-dev-change-this
+
+Before a publicly trusted certificate can be issued using the usual HTTP validation method, you need:
+
+1. A domain name.
+2. A DNS record pointing the domain to your server's public IP address.
+3. Port 80 reachable for the HTTP validation challenge.
+4. A certificate client such as Certbot.
+
+Register domain
+|
+v
+Configure DNS
+|
+v
+Point domain to server
+|
+v
+Make port 80 accessible
+|
+v
+Run Certbot
+|
+v
+Obtain certificate
+|
+v
+Configure Nginx
+|
+v
+HTTPS becomes available
+
+Certificates expire, so you also need automatic renewal and a way to reload Nginx after successful renewal.
+We'll implement that when we revisit your actual Docker deployment.
+What happens when you SSH into a remote Ubuntu server.
+How SSH public/private key authentication works.
+How to copy files using SCP and SFTP.
+What UFW does.
+Why ports 22, 80 and 443 matter.
+How to prevent users from accessing PostgreSQL directly from the public internet.
+
+Step 1: Generate your SSH key pair
+On your Windows computer, open PowerShell.
+
+Run: ssh-keygen -t ed25519 -C "geocloud-server"
+
+Part Meaning
+ssh-keygen Generates SSH keys.
+-t Specifies the key type.
+ed25519 The key algorithm.
+-C Adds a descriptive comment.
+
+id_ed25519 is your private key.
+id_ed25519.pub is your public key.
+
+Public Key is installed on the Ubuntu Machine
+On Ubuntu, public keys for a particular user are stored in: ~/.ssh/authorized_keys
+
+Once connected, run:
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/authorized_keys
+
+Paste it into authorized_keys as one line, save and exit,: chmod 600 ~/.ssh/authorized_keys
+
+700 restricts access to the .ssh directory.
+600 restricts access to the authorized keys file.
+
+Now try connecting with your private key: ssh -i "$env:USERPROFILE\.ssh\id_ed25519" ubuntu@203.0.113.10
+
+You won't need to repeatedly type a server password every time you deploy an update or inspect application logs.
+
+File transfer: SCP and SFTP
+Now imagine your GEO_CLOUD project is on your Windows computer, but you need to move it to your Ubuntu server.
+
+SCP — Secure Copy or SFTP — SSH File Transfer Protocol
+
+SCP:
+Suppose you have: C:\Users\DELL\Downloads\GEO_CLOUD & You want to copy a ZIP archive to your server.
+
+In Powershell: scp "$env:USERPROFILE\Downloads\GEO_CLOUD.zip" ubuntu@203.0.113.10:/home/ubuntu/ **sample IP number**
+
+The general structure is: scp SOURCE DESTINATION,,, scp local_file.zip user@server:/home/user/
+
+To copy an entire directory recursively, use -r: scp -r ./GEO_CLOUD ubuntu@203.0.113.10:/home/ubuntu/
+
+You can also download something from the server: scp ubuntu@203.0.113.10:/home/ubuntu/app.log . ""the dot means current local directory""
+
+SFTP — SSH File Transfer Protocol
+
+Connect: sftp ubuntu@203.0.113.10
+Some useful commands:
+Command Purpose
+ls List remote files.
+pwd Show remote working directory.
+cd Change remote directory.
+put file.zip Upload a file.
+get file.zip Download a file.
+mkdir folder Create a remote directory.
+exit Close the session.
+
+4. Linux firewall: UFW
+   A firewall controls network traffic according to configured rules.
+
+On Ubuntu: sudo ufw status verbose
+Port Service Public access?
+
+22 SSH Restricted administrator access
+80 HTTP / Nginx Yes
+443 HTTPS / Nginx Yes
+8000 FastAPI Normally internal only
+5432 PostgreSQL Normally internal only
+
+Configure UFW
+For our example deployment, we want to permit SSH, HTTP and HTTPS.
+sudo ufw allow OpenSSH : This allows the standard SSH service.
+
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+sudo ufw default deny incoming default deny incoming traffic
+sudo ufw default allow outgoing default for outgoing
+
+Before enabling UFW, verify that your SSH access is allowed. then
+
+sudo ufw enable
+finally
+sudo ufw status numbered
+
+**Never enable a restrictive firewall on a remote server without first allowing the SSH connection you're currently using. Otherwise, you can lock yourself out.**
+
+**Linux process management and systemd.**
+Each running process has a unique identifier called a PID (Process ID).
+How do you see running processes?
+On Ubuntu, execute: ps aux
+
+You can filter for your worker: pgrep -af geospatial.worker
+You might see something like:
+2451 python -m geospatial.worker
+Here, 2451 is the PID.
+
+Useful process-management commands
+Command Purpose
+ps aux List running processes.
+pgrep -af python Find Python processes.
+top Monitor CPU and memory usage.
+free -h Check available memory.
+kill PID Request that a process terminate.
+kill -9 PID Forcefully terminate a process.
+
+One important distinction:
+kill 2451 Normally sends SIGTERM, asking the process to stop gracefully.
+Whereas:
+kill -9 2451 sends SIGKILL, which forces termination immediately.
+
+You could try:
+python -m geospatial.worker &
+
+The & runs the command in the background of your shell.
+
+**systemd** is a system and service manager used by Ubuntu and many other Linux distributions.
+Its job includes managing services and other system resources.
+
+A service is a program that is managed by systemd.
+For example, your background worker can become a systemd service.
+
+Then you can control it using commands such as:
+
+sudo systemctl start geocloud-worker
+sudo systemctl stop geocloud-worker
+sudo systemctl restart geocloud-worker
+sudo systemctl status geocloud-worker
+
+You no longer need to manually locate the Python process and manage it yourself.
+
+Create a service file: sudo nano /etc/systemd/system/geocloud-worker.service
+The .service extension identifies a systemd service unit.
+
+Step 2: Understand the service configuration
+Add this:
+[Unit]
+Description=GEO_CLOUD Background Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=ubuntu
+WorkingDirectory=/opt/geocloud
+
+EnvironmentFile=/etc/geocloud/worker.env
+
+ExecStart=/opt/geocloud/.venv/bin/python -m geospatial.worker
+
+Restart=on-failure
+RestartSec=5
+
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+
+
+"""
+Description gives the service a human-readable name.
+After establishes startup ordering relative to another systemd target.
+Wants requests that the network-online target also be started.
+
+Type=simple    This tells systemd that the service is a continuously running process.
+User=ubuntu    The worker runs as the Ubuntu user rather than as root.
+
+
+
+Create the configuration directory: sudo mkdir -p /etc/geocloud
+
+
+Create the environment file:   sudo nano /etc/geocloud/worker.env
+
+
+An example might look like:
+GEO_CLOUD_ENV=production
+DATABASE_URL=postgresql://user:password@localhost:5432/gis_jobs
+GEO_CLOUD_DATASETS_DIR=/var/lib/geocloud/datasets
+
+
+These are illustrative values. Configure the actual production credentials, database address and storage location for your deployment.
+
+Set appropriate permissions:   sudo chmod 600 /etc/geocloud/worker.env
+
+Once the service file has been created, execute:   sudo systemctl daemon-reload
+It tells systemd to reload its service definitions because we have introduced a new service file.
+
+sudo systemctl start geocloud-worker
+then: sudo systemctl status geocloud-worker
+
+Now we want to make it start automatically when Ubuntu boots: sudo systemctl enable --now geocloud-worker
+
+OTHER USEFUL commands
+
+Command	Purpose
+systemctl start geocloud-worker	Start worker.
+systemctl stop geocloud-worker	Stop worker.
+systemctl restart geocloud-worker	Restart worker.
+systemctl status geocloud-worker	Inspect service status.
+systemctl enable geocloud-worker	Enable startup at boot.
+systemctl disable geocloud-worker	Disable startup at boot.
+
+You can access service logs with:
+sudo journalctl -u geocloud-worker
+
+Show the latest logs:
+sudo journalctl -u geocloud-worker -n 50
+
+
+Follow logs continuously:
+sudo journalctl -u geocloud-worker -f
+
+
+Show logs since a particular time:
+sudo journalctl -u geocloud-worker --since today
+
+
