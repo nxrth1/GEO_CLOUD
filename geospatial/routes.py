@@ -1,6 +1,7 @@
 import json
 import math
 import logging
+import os
 from typing import Any
 from uuid import UUID
 
@@ -9,6 +10,8 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from pyproj import CRS
 from pyproj.exceptions import CRSError
+from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 
 from .auth import get_current_owner
@@ -50,6 +53,10 @@ from .processes import validate_json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+redis_client = Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True,
+)
 
 
 def get_db():
@@ -58,6 +65,10 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_redis() -> Redis:
+    return redis_client
 
 
 def _load_dataset_record(record, *, not_found_detail: str = "Dataset not found."):
@@ -526,31 +537,37 @@ def list_datasets(
 
 @router.get("/datasets/{dataset_id}/metadata")
 def get_dataset_metadata(
-    owner_id: ,
     dataset_id: UUID,
-    redis_client: ,
     db: Session = Depends(get_db),
     owner_id: str = Depends(get_current_owner),
+    cache: Redis = Depends(get_redis),
 ):
-
-    cache_key = f"dataset:{owner_id}:{dataset_id}"
-    cached = redis_client.get(cache_key)
+    cache_key = f"dataset:{owner_id}:{dataset_id}:metadata"
+    try:
+        cached = cache.get(cache_key)
+    except RedisError as error:
+        logger.warning("Dataset metadata cache read failed: %s", error)
+        cached = None
 
     if cached is not None:
-        return json.loads(cached)
+        try:
+            return json.loads(cached)
+        except (json.JSONDecodeError, TypeError) as error:
+            logger.warning("Discarding invalid dataset metadata cache entry: %s", error)
+            try:
+                cache.delete(cache_key)
+            except RedisError as cache_error:
+                logger.warning("Could not remove invalid dataset metadata cache entry: %s", cache_error)
 
     record = get_owned_dataset(db, dataset_id, owner_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Dataset not found.")
-    return dataset_metadata_response(record)
-
     metadata = dataset_metadata_response(record)
-
-    redis_client.set(
-        cache_key,
-        json.dumps(metadata),
-        ex=60
-    )
+    try:
+        cache.set(cache_key, json.dumps(metadata), ex=60)
+    except RedisError as error:
+        logger.warning("Dataset metadata cache write failed: %s", error)
+    return metadata
 
 
 @router.delete("/datasets/{dataset_id}")
@@ -558,6 +575,7 @@ def delete_owned_dataset_route(
     dataset_id: UUID,
     db: Session = Depends(get_db),
     owner_id: str = Depends(get_current_owner),
+    cache: Redis = Depends(get_redis),
 ):
     record, deleted = soft_delete_owned_dataset(db, dataset_id, owner_id)
     if record is None:
@@ -567,6 +585,10 @@ def delete_owned_dataset_route(
             status_code=409,
             detail="Dataset is currently used by a queued or running job.",
         )
+    try:
+        cache.delete(f"dataset:{owner_id}:{dataset_id}:metadata")
+    except RedisError as error:
+        logger.warning("Dataset metadata cache invalidation failed: %s", error)
 
     backend = getattr(record, "storage_backend", "local")
     storage_key = getattr(record, "storage_key", None) or f"{record.id}.json"

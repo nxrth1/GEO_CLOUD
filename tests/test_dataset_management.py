@@ -223,6 +223,61 @@ def test_list_route_scopes_query_to_current_owner(monkeypatch):
     assert "storage_key" not in response.json()["items"][0]
 
 
+def test_dataset_metadata_route_caches_by_owner(monkeypatch):
+    dataset_id = uuid4()
+    record = SimpleNamespace(
+        id=dataset_id,
+        name="Nairobi",
+        original_filename="nairobi.geojson",
+        format="geojson",
+        content_type="application/geo+json",
+        size_bytes=200,
+        sha256="a" * 64,
+        feature_count=1,
+        geometry_types=["Point"],
+        bbox=[36.8, -1.2, 36.8, -1.2],
+        crs="OGC:CRS84",
+        created_at=datetime(2026, 10, 29, tzinfo=timezone.utc),
+        deleted_at=None,
+    )
+
+    class FakeRedis:
+        def __init__(self):
+            self.values = {}
+            self.set_calls = []
+
+        def get(self, key):
+            return self.values.get(key)
+
+        def set(self, key, value, ex):
+            self.values[key] = value
+            self.set_calls.append((key, ex))
+
+        def delete(self, key):
+            self.values.pop(key, None)
+
+    cache = FakeRedis()
+    database_calls = []
+    monkeypatch.setattr(routes, "redis_client", cache)
+    monkeypatch.setattr(
+        routes,
+        "get_owned_dataset",
+        lambda db, requested_id, owner: (
+            database_calls.append((requested_id, owner)) or record
+        ),
+    )
+
+    first_response = client.get(f"/datasets/{dataset_id}/metadata")
+    second_response = client.get(f"/datasets/{dataset_id}/metadata")
+
+    cache_key = f"dataset:local-development:{dataset_id}:metadata"
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.json() == second_response.json()
+    assert database_calls == [(dataset_id, "local-development")]
+    assert cache.set_calls == [(cache_key, 60)]
+
+
 def test_multipart_upload_route_accepts_valid_geojson(tmp_path, monkeypatch):
     root = tmp_path / "datasets"
     monkeypatch.setenv("GEO_CLOUD_DATASETS_DIR", str(root))

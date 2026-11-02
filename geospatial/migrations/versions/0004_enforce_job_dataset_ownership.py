@@ -1,12 +1,12 @@
 """Enforce job/dataset owner consistency in PostgreSQL.
 
-Revision ID: 0004_enforce_job_dataset_ownership
+Revision ID: 0004_enforce_job_dataset_owner
 Revises: 0003_resource_ownership
 """
 from alembic import op
 
 
-revision = "0004_enforce_job_dataset_ownership"
+revision = "0004_enforce_job_dataset_owner"
 down_revision = "0003_resource_ownership"
 branch_labels = None
 depends_on = None

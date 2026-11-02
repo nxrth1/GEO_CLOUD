@@ -1,14 +1,14 @@
 """Add dataset metadata, storage identifiers, and soft-delete lifecycle.
 
 Revision ID: 0005_dataset_management
-Revises: 0004_enforce_job_dataset_ownership
+Revises: 0004_enforce_job_dataset_owner
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "0005_dataset_management"
-down_revision = "0004_enforce_job_dataset_ownership"
+down_revision = "0004_enforce_job_dataset_owner"
 branch_labels = None
 depends_on = None
 
