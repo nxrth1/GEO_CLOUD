@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
+import json
 
 from sqlalchemy import (
     Column,
@@ -16,7 +17,31 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from .database import Base
+from .webhook.schemasv2 import WebhookEvent
+from cryptography.fernet import Fernet
+from sqlalchemy import String, TypeDecorator
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# Load the master key from a secure environment variable or secret manager
+MASTER_KEY = os.environ["GEO_CLOUD_ENCRYPTION_KEY"].encode()
+cipher_suite = Fernet(MASTER_KEY)
+
+
+class EncryptedString(TypeDecorator):
+  """Transparently encrypts and decrypts string values in the database."""
+
+  impl = String
+  cache_ok = True
+
+  def process_bind_param(self, value: str | None, dialect) -> str | None:
+    if value is None:
+      return None
+    return cipher_suite.encrypt(value.encode("utf-8")).decode("utf-8")
+
+  def process_result_value(self, value: str | None, dialect) -> str | None:
+    if value is None:
+      return None
+    return cipher_suite.decrypt(value.encode("utf-8")).decode("utf-8")
 
 def _enum_values(enum_class):
     return [member.value for member in enum_class]
@@ -152,3 +177,42 @@ class Job(Base):
     )
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+
+class WebhookSubscription(Base):
+    __tablename__ = "webhook_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    owner_id: Mapped[str] = mapped_column(
+        String,
+        index=True,
+    )
+    url: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    events: Mapped[WebhookEvent] = mapped_column(
+        SQLEnum(
+           
+        )
+        nullable=False,
+    )
+    secret: Mapped[str] = mapped_column(
+        EncryptedString(512),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
