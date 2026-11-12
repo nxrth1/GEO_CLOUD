@@ -21,7 +21,8 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from .database import Base
 from .security import get_encryption_service 
 from sqlalchemy.types import TypeDecorator
-from sqlalchemy.orm import mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
+
 
 
 @lru_cache(maxsize=1)
