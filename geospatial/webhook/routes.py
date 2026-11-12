@@ -7,7 +7,7 @@ from fastapi import FastAPI, APIRouter
 import JSON
 
 from .authentication import
-from geospatial.models import WebhookStatus, WebhookSubscription
+from geospatial.models import WebhookStatus, WebhookSubscription, WeWebhookSubscriptionResponse
 from models import WebhookSubscription 
 
 @router = APIRouter()
@@ -22,7 +22,7 @@ def get_webhook_events() -> Response:
     return JSONResponse(content=list(WebhookEventType))
 
 
-@router.post("/webhooks/events")
+@router.post("/webhooks/events",response_model=WebhookEventType)
 def create_webhook_event() -> Response:
     """
     Creates a new webhook event type.
@@ -35,39 +35,39 @@ def create_webhook_event() -> Response:
     description = data.get("description")
 
     if not event_type or not description:
-        return JSON({"error": "Missing required fields"}), 400
+        return JSONResponse(content={"error": "Missing required fields"}, status_code=400)
 
     # Check if the event type already exists
     if event_type in WebhookEventType.__members__:
-        return JSON({"error": "Event type already exists"}), 400
+        return JSONResponse(content={"error": "Event type already exists"}, status_code=400)
 
     # Create the new event type
     new_event = WebhookEventType(event_type, description)
     db.session.add(new_event)
     db.session.commit()
 
-    return JSON({"message": "Event type created", "event_type": event_type}), 201
+    return JSONResponse(content={"message": "Event type created", "event_type": event_type}, status_code=201)
 
-@router.POST("/webhooks/subscriptions")
+@router.post    ("/webhooks/subscriptions", response_model=WebhookSubscription)
 def create_webhook_subscription() -> Response:
     """
     Registers a new webhook URL and its chosen events.
     """
     data = request.get_json()
     if not data:
-        return JSON({"error": "Invalid JSON payload"}), 400
+        return JSONResponse(content={"error": "Invalid JSON payload"}, status_code=400)
 
     url = data.get("url")
     events = data.get("events")
     secret = data.get("secret")
 
     if not url or not events or not secret:
-        return JSON({"error": "Missing required fields"}), 400
+        return JSONResponse(content={"error": "Missing required fields"}, status_code=400)
 
     # Validate events
     invalid_events = [event for event in events if event not in WebhookEventType.__members__]
     if invalid_events:
-        return JSON({"error": f"Invalid event types: {invalid_events}"}), 400
+        return JSONResponse(content={"error": f"Invalid event types: {invalid_events}"}, status_code=400)
 
     # Create the subscription
     subscription = WebhookSubscription(
@@ -81,16 +81,16 @@ def create_webhook_subscription() -> Response:
     db.session.add(subscription)
     db.session.commit()
 
-    return JSON({"id": str(subscription.id)}), 201
+    return JSONResponse(content={"id": str(subscription.id)}), 201
 
-@router.get("/webhooks/subscriptions")
+@router.get("/webhooks/subscriptions", responsemodel=WebhookSubscriptionResponse, status_code=status.HTTP_201_CREATED))
 def list_webhook_subscriptions() -> Response:
     """
     Lists the authenticated owner's subscriptions.
     """
     owner_id = get_authenticated_user_id()
     subscriptions = WebhookSubscription.query.filter_by(owner_id=owner_id).all()
-    return jsonify([{
+    return JSONResponse(content=[{
         "id": str(sub.id),
         "url": sub.url,
         "events": sub.events,
@@ -99,7 +99,7 @@ def list_webhook_subscriptions() -> Response:
     } for sub in subscriptions]), 200
 
 
-@router.get("/webhooks/subscriptions/<uuid:subscription_id>")
+@router.get("/webhooks/subscriptions/<uuid:subscription_id>" )
 def get_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     """
     Retrieves one subscription.
