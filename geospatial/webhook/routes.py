@@ -1,39 +1,73 @@
 import uuid
 import logging
-from flask import request, jsonify, Response
+from venv import logger
+
+from httpcore import Response, request
+from fastapi import FastAPI, APIRouter
 import JSON
 
 from .authentication import
+from geospatial.models import WebhookStatus, WebhookSubscription
+from models import WebhookSubscription 
+
+@router = APIRouter()
+@logger = logging.getLogger(__name__)
 
 
-
-@route("/webhooks/events", methods=["GET"])
+@router.get("/webhooks/events")
 def get_webhook_events() -> Response:
     """
     Returns a list of all event types GEO_CLOUD supports.
     """
-    return jsonify(list(WebhookEventType))
+    return JSONResponse(content=list(WebhookEventType))
 
-@route("/webhooks/subscriptions", methods=["POST"])
+
+@router.post("/webhooks/events")
+def create_webhook_event() -> Response:
+    """
+    Creates a new webhook event type.
+    """
+        data = request.get_json()
+    if not data:
+        return JSONResponse(content={"error": "Invalid JSON payload"}, status_code=400)
+
+    event_type = data.get("event_type")
+    description = data.get("description")
+
+    if not event_type or not description:
+        return JSON({"error": "Missing required fields"}), 400
+
+    # Check if the event type already exists
+    if event_type in WebhookEventType.__members__:
+        return JSON({"error": "Event type already exists"}), 400
+
+    # Create the new event type
+    new_event = WebhookEventType(event_type, description)
+    db.session.add(new_event)
+    db.session.commit()
+
+    return JSON({"message": "Event type created", "event_type": event_type}), 201
+
+@router.POST("/webhooks/subscriptions")
 def create_webhook_subscription() -> Response:
     """
     Registers a new webhook URL and its chosen events.
     """
     data = request.get_json()
     if not data:
-        return jsonify({"error": "Invalid JSON payload"}), 400
+        return JSON({"error": "Invalid JSON payload"}), 400
 
     url = data.get("url")
     events = data.get("events")
     secret = data.get("secret")
 
     if not url or not events or not secret:
-        return jsonify({"error": "Missing required fields"}), 400
+        return JSON({"error": "Missing required fields"}), 400
 
     # Validate events
     invalid_events = [event for event in events if event not in WebhookEventType.__members__]
     if invalid_events:
-        return jsonify({"error": f"Invalid event types: {invalid_events}"}), 400
+        return JSON({"error": f"Invalid event types: {invalid_events}"}), 400
 
     # Create the subscription
     subscription = WebhookSubscription(
@@ -47,12 +81,10 @@ def create_webhook_subscription() -> Response:
     db.session.add(subscription)
     db.session.commit()
 
-    return jsonify({"id": str(subscription.id)}), 201
+    return JSON({"id": str(subscription.id)}), 201
 
-
-
-@route("/webhooks/subscriptions", methods=["GET"])
-def list_webhook_subscriptions() -> Response: 
+@router.get("/webhooks/subscriptions")
+def list_webhook_subscriptions() -> Response:
     """
     Lists the authenticated owner's subscriptions.
     """
@@ -67,9 +99,7 @@ def list_webhook_subscriptions() -> Response:
     } for sub in subscriptions]), 200
 
 
-
-
-@route("/webhooks/subscriptions/<uuid:subscription_id>", methods=["GET"])
+@router.get("/webhooks/subscriptions/<uuid:subscription_id>")
 def get_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     """
     Retrieves one subscription.
@@ -77,9 +107,27 @@ def get_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     owner_id = get_authenticated_user_id()
     subscription = WebhookSubscription.query.filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
-        return jsonify({"error": "Subscription not found"}), 404
+        return JSON({"error": "Subscription not found"}), 404
 
-    return jsonify({
+    return JSON({
+        "id": str(subscription.id),
+        "url": subscription.url,
+        "events": subscription.events,
+        "status": subscription.status.value,
+        "created_at": subscription.created_at.isoformat(),
+    }), 200
+
+@router.get("/webhooks/subscriptions/<uuid:subscription_id>")
+def get_webhook_subscription(subscription_id: uuid.UUID) -> Response:
+    """
+    Retrieves one subscription.
+    """
+    owner_id = get_authenticated_user_id()
+    subscription = WebhookSubscription.query.filter_by(id=subscription_id, owner_id=owner_id).first()
+    if not subscription:
+        return JSON({"error": "Subscription not found"}), 404
+
+    return JSON({
         "id": str(subscription.id),
         "url": subscription.url,
         "events": subscription.events,
@@ -88,7 +136,7 @@ def get_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     }), 200
 
 
-@route("/webhooks/subscriptions/<uuid:subscription_id>", methods=["PATCH"])
+@router.patch("/webhooks/subscriptions/<uuid:subscription_id>")
 def update_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     """
     Updates its URL or subscribed events.
@@ -96,11 +144,11 @@ def update_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     owner_id = get_authenticated_user_id()
     subscription = WebhookSubscription.query.filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
-        return jsonify({"error": "Subscription not found"}), 404
+        return JSON({"error": "Subscription not found"}), 404
 
     data = request.get_json()
     if not data:
-        return jsonify({"error": "Invalid JSON payload"}), 400
+        return JSON({"error": "Invalid JSON payload"}), 400
 
     url = data.get("url")
     events = data.get("events")
@@ -111,12 +159,12 @@ def update_webhook_subscription(subscription_id: uuid.UUID) -> Response:
         # Validate events
         invalid_events = [event for event in events if event not in WebhookEventType.__members__]
         if invalid_events:
-            return jsonify({"error": f"Invalid event types: {invalid_events}"}), 400
+            return JSON({"error": f"Invalid event types: {invalid_events}"}), 400
         subscription.events = events
 
     db.session.commit()
 
-    return jsonify({
+    return JSON({
         "id": str(subscription.id),
         "url": subscription.url,
         "events": subscription.events,
@@ -126,7 +174,7 @@ def update_webhook_subscription(subscription_id: uuid.UUID) -> Response:
 
 
 
-@route("/webhooks/subscriptions/<uuid:subscription_id>", methods=["DELETE"])
+@router.delete("/webhooks/subscriptions/<uuid:subscription_id>")
 def delete_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     """
     Disables a subscription without deleting its history.
@@ -134,15 +182,15 @@ def delete_webhook_subscription(subscription_id: uuid.UUID) -> Response:
     owner_id = get_authenticated_user_id()
     subscription = WebhookSubscription.query.filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
-        return jsonify({"error": "Subscription not found"}), 404
+        return JSON({"error": "Subscription not found"}), 404
 
     subscription.status = WebhookStatus.DISABLED
     db.session.commit()
 
-    return jsonify({"message": "Subscription disabled"}), 200
+    return JSON({"message": "Subscription disabled"}), 200
 
 
-@route("/webhooks/subscriptions/<uuid:subscription_id>/rotate-secret", methods=["POST"])
+@router.post("/webhooks/subscriptions/<uuid:subscription_id>/rotate-secret")
 def rotate_webhook_secret(subscription_id: uuid.UUID) -> Response:
     """
     Rotates the secret for a subscription.
@@ -150,12 +198,12 @@ def rotate_webhook_secret(subscription_id: uuid.UUID) -> Response:
     owner_id = get_authenticated_user_id()
     subscription = WebhookSubscription.query.filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
-        return jsonify({"error": "Subscription not found"}), 404
+        return JSON({"error": "Subscription not found"}), 404
 
     new_secret = generate_new_secret()  # Implement this function to generate a new secret
     subscription.secret = new_secret
     db.session.commit()
 
-    return jsonify({"message": "Secret rotated", "new_secret": new_secret}), 200
+    return JSON({"message": "Secret rotated", "new_secret": new_secret}), 200
 
 
