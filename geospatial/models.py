@@ -1,7 +1,6 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-import json
 
 from sqlalchemy import (
     Column,
@@ -12,36 +11,37 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
+    func,
     text,
 )
+from functools import lru_cache
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from .database import Base
-from .webhook.schemasv2 import WebhookEvent
-from cryptography.fernet import Fernet
-from sqlalchemy import String, TypeDecorator
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from .security import get_encryption_service 
+from sqlalchemy.types import TypeDecorator
+from sqlalchemy.orm import mapped_column
 
-# Load the master key from a secure environment variable or secret manager
-MASTER_KEY = os.environ["GEO_CLOUD_ENCRYPTION_KEY"].encode()
-cipher_suite = Fernet(MASTER_KEY)
 
+@lru_cache(maxsize=1)
+def _cached_encryption_service():
+  return get_encryption_service()
 
 class EncryptedString(TypeDecorator):
-  """Transparently encrypts and decrypts string values in the database."""
-
-  impl = String
+  impl = Text
   cache_ok = True
 
   def process_bind_param(self, value: str | None, dialect) -> str | None:
     if value is None:
       return None
-    return cipher_suite.encrypt(value.encode("utf-8")).decode("utf-8")
+    return _cached_encryption_service().encrypt(value)
 
   def process_result_value(self, value: str | None, dialect) -> str | None:
     if value is None:
       return None
-    return cipher_suite.decrypt(value.encode("utf-8")).decode("utf-8")
+    return _cached_encryption_service().decrypt(value)
+
 
 def _enum_values(enum_class):
     return [member.value for member in enum_class]
@@ -178,39 +178,40 @@ class Job(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
+class WebhookStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    DISABLED = "disabled"
 
 
 class WebhookSubscription(Base):
     __tablename__ = "webhook_subscriptions"
+    __table_args__ = (
+        Index("ix_webhook_subscriptions_owner_id", "owner_id"),
+        UniqueConstraint("id", "owner_id", name="uq_webhook_subscriptions_id_owner"),
+    )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        primary_key=True,
-        default=uuid.uuid4,
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(String(255), nullable=False)
+    url = Column(String(2048), nullable=False)
+
+    events: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
     )
-    owner_id: Mapped[str] = mapped_column(
-        String,
-        index=True,
-    )
-    url: Mapped[str] = mapped_column(
-        String,
+    secret = Column(
+        EncryptedString(),
         nullable=False,
     )
-    events: Mapped[WebhookEvent] = mapped_column(
-        SQLEnum(
-           
-        )
+    status = Column(
+        Enum(WebhookStatus, values_callable=_enum_values, name="webhookstatus"),
         nullable=False,
+        default=WebhookStatus.PENDING, 
+        server_default=text(f"'{WebhookStatus.PENDING.value}'"),
+
     )
-    secret: Mapped[str] = mapped_column(
-        EncryptedString(512),
-        nullable=False,
-    )
-    status: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-    )
-    created_at: Mapped[datetime] = mapped_column(
+    created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
