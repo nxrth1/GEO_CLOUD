@@ -454,9 +454,9 @@ def get_job_status(
 
 def _upload_error_response(error: Exception):
     if isinstance(error, DatasetTooLargeError):
-        return HTTPException(status_code=413, detail=str(error))
+        raise HTTPException(status_code=413, detail=str(error))
     if isinstance(error, DatasetValidationError):
-        return HTTPException(
+        raise HTTPException(
             status_code=422,
             detail={
                 "message": "Dataset failed critical validation rules.",
@@ -464,8 +464,8 @@ def _upload_error_response(error: Exception):
             },
         )
     if isinstance(error, DatasetUploadError):
-        return HTTPException(status_code=422, detail=str(error))
-    return HTTPException(status_code=500, detail="Could not save dataset.")
+        raise HTTPException(status_code=422, detail=str(error))
+    raise HTTPException(status_code=500, detail="Could not save dataset.")
 
 
 @router.post("/datasets", status_code=201)
