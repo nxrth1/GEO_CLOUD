@@ -3,6 +3,7 @@ import logging
 import secrets
 from typing import List, Optional
 from enum import Enum
+from uuid import UUID
 
 from fastapi import APIRouter, Response, status,HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -53,13 +54,13 @@ def get_webhook_events() -> Response:
     """
     return JSONResponse(content=[e.value for e in WebhookEventType], status_code=200)
 
-@router.post("/webhooks/subscriptions",status_code= 201,response_model=WebhookSubscriptionResponse)
+@router.post("/webhooks/subscriptions",response_model=WebhookSubscriptionResponse, status_code=status.HTTP_201_CREATED)
 def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session = Depends(get_db), owner_id: UUID = Depends(get_current_owner)) -> Response:
     """
     Registers a new webhook URL and its chosen events.
     """
     valid_events = {event.value for event in WebhookEventType}
-    invalid_events = [event for event in payload.events if event not in WebhookEventType]
+    invalid_events = [event for event in payload.events if event not in valid_events]
     if invalid_events:
         raise HTTPException(status_code=400, detail={"error": f"Invalid event types: {invalid_events}"})
 
@@ -133,7 +134,8 @@ def update_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depend
         subscription.url = url
     if events:
         # Validate events
-        invalid_events = [event for event in events if event not in WebhookEventType.__members__]
+        valid_events = {event.value for event in WebhookEventType}
+        invalid_events = [event for event in events if event not in valid_events]
         if invalid_events:
             raise HTTPException(detail=f"Invalid event types: {invalid_events}", status_code=400)
         subscription.events = events
