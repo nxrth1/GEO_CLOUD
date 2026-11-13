@@ -1,4 +1,3 @@
-import UUID
 import logging
 import secrets
 from typing import List, Optional
@@ -36,6 +35,11 @@ class WebhookSubscriptionResponse(BaseModel):
     }
 
 class WebhookSubscriptionCreateResponse(BaseModel):
+    id: UUID
+    url: str
+    events: List[str]
+    status: str
+    created_at: str
     secret: str
 
 class WebhookSubscriptionCreate(BaseModel):
@@ -54,8 +58,8 @@ def get_webhook_events() -> Response:
     """
     return JSONResponse(content=[e.value for e in WebhookEventType], status_code=200)
 
-@router.post("/webhooks/subscriptions",response_model=WebhookSubscriptionResponse, status_code=status.HTTP_201_CREATED)
-def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session = Depends(get_db), owner_id: UUID = Depends(get_current_owner)) -> Response:
+@router.post("/webhooks/subscriptions",response_model=WebhookSubscriptionCreateResponse, status_code=status.HTTP_201_CREATED)
+def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session = Depends(get_db), owner_id: str = Depends(get_current_owner)) -> WebhookSubscriptionCreateResponse:
     """
     Registers a new webhook URL and its chosen events.
     """
@@ -67,7 +71,7 @@ def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session 
     signed_secret = f"whsec_{secrets.token_urlsafe(32)}" # Generate a secure random secret
     subscription = WebhookSubscription(
         owner_id = owner_id,
-        url=payload.url,
+        url=str(payload.url),
         events=payload.events,
         secret = signed_secret,
         status=WebhookStatus.PENDING,
@@ -77,15 +81,22 @@ def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session 
     db.commit()
     db.refresh(subscription)  # Optional: reloads DB-generated fields (like ID/timestamps) onto the object
 
-    return subscription(content={"id": str(subscription.id)}, status_code=201)
+    return {
+        "id": subscription.id,
+        "url": subscription.url,
+        "events": subscription.events,
+        "status": subscription.status.value,
+        "created_at": subscription.created_at.isoformat(),
+        "secret": signed_secret,
+    }
 
-@router.get("/webhooks/subscriptions", response_model=list[WebhookSubscriptionResponse], status_code=status.HTTP_201_CREATED)
+@router.get("/webhooks/subscriptions", response_model=list[WebhookSubscriptionResponse], status_code=status.HTTP_200_OK)
 def list_webhook_subscriptions(db: Session = Depends(get_db)) -> Response:
     """
     Lists the authenticated owner's subscriptions.
     """
     owner_id = Depends(get_current_owner)
-    subscriptions = await db.query(WebhookSubscription).filter_by(owner_id=owner_id).all()
+    subscriptions = db.query(WebhookSubscription).filter_by(owner_id=owner_id).all()
     return JSONResponse(content=[{
         "id": str(sub.id),
         "url": sub.url,
@@ -152,7 +163,7 @@ def update_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depend
         "created_at": subscription.created_at.isoformat(),
     }, status_code=200)
 
-@router.delete("/webhooks/subscriptions/{uuid:subscription_id}")
+@router.delete("/webhooks/subscriptions/{subscription_id}")
 def delete_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
     """
     Disables a subscription without deleting its history.
@@ -168,7 +179,7 @@ def delete_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depend
     return JSONResponse(content={"message": "Subscription disabled"}, status_code=200)
 
 
-@router.post("/webhooks/subscriptions/{uuid:subscription_id}/rotate-secret")
+@router.post("/webhooks/subscriptions/{subscription_id}/rotate-secret")
 def rotate_webhook_secret(subscription_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
     """
     Rotates the secret for a subscription.
