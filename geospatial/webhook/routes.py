@@ -13,15 +13,13 @@ from pydantic import BaseModel, HttpUrl
 from geospatial.auth import get_current_owner
 from geospatial.models import WebhookStatus, WebhookSubscription
 from geospatial.dependancies import get_db
+from webhook.schemas2 import WebhookEvent
 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-class WebhookEventType(str, Enum):
-    JOB_COMPLETED = "job.completed"
-    JOB_FAILED = "job.failed"
 
 class WebhookSubscriptionResponse(BaseModel):
     id: UUID
@@ -48,7 +46,7 @@ class WebhookSubscriptionCreate(BaseModel):
 
 class WebhookSubscriptionUpdate(BaseModel):
     url: Optional[HttpUrl] = None
-    events: Optional[List[WebhookEventType]] = None
+    events: Optional[List[WebhookEvent]] = None
 
 generate_new_secret = lambda: f"whsec_{secrets.token_urlsafe(32)}"  
 
