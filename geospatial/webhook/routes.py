@@ -41,34 +41,7 @@ def get_webhook_events() -> Response:
     """
     return JSONResponse(content=[e.value for e in WebhookEventType], status_code=200)
 
-
-@router.post("/webhooks/events",response_model=WebhookEventTypeCreate, status_code=status.HTTP_201_CREATED )
-def create_webhook_event() -> Response:
-    """
-    Creates a new webhook event type.
-    """
-        data = await request.json()
-    if not data:
-        return JSONResponse(content={"error": "Invalid JSON payload"}, status_code=400)
-
-    event_type = data.get("event_type")
-    description = data.get("description")
-
-    if not event_type or not description:
-        return JSONResponse(content={"error": "Missing required fields"}, status_code=400)
-
-    # Check if the event type already exists
-    if event_type in WebhookEventType.__members__:
-        return JSONResponse(content={"error": "Event type already exists"}, status_code=400)
-
-    # Create the new event type
-    new_event = WebhookEventType(event_type, description)
-    db.session.add(new_event)
-    db.session.commit()
-
-    return JSONResponse(content={"message": "Event type created", "event_type": event_type}, status_code=201)
-
-@router.post("/webhooks/subscriptions", response_model=WebhookSubscription, status_code=status.HTTP_201_CREATED)
+router.post("/webhooks/subscriptions", response_model=WebhookSubscription, status_code=status.HTTP_201_CREATED)
 def create_webhook_subscription(payload: WebhookSubscriptionCreate) -> Response:
     """
     Registers a new webhook URL and its chosen events.
