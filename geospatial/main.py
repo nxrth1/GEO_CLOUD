@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import router
+from .webhook.routes import router as webhook_router
 from .request_limits import RequestBodyLimitMiddleware
 
 from .logging_config import setup_logging
@@ -50,3 +51,4 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(webhook_router, prefix="/api", tags=["webhooks"])

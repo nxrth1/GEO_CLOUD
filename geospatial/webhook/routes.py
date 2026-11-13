@@ -132,23 +132,19 @@ def update_webhook_subscription(subscription_id: UUID, db: Session = Depends(get
     subscription = db.query(WebhookSubscription).filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
         raise HTTPException(detail="Subscription not found", status_code=404)
+    if payload.url is not None:
+        subscription.url = str(payload.url)
 
-    if not payload:
-        raise HTTPException(detail="Invalid JSON payload", status_code=400)
-
-    subscription.url = payload.url
-    events = payload.events
-
-    if url:
-        subscription.url = url
-    if events:
+    if payload.events is not None:
+        if len(payload.events) == 0:
+            raise HTTPException(detail="Events list cannot be empty", status_code=400)
 
         # Validate events
         valid_events = {event.value for event in WebhookEventType}
-        invalid_events = [event for event in events if event not in valid_events]
+        invalid_events = [event for event in payload.events if event not in valid_events]
         if invalid_events:
             raise HTTPException(detail=f"Invalid event types: {invalid_events}", status_code=400)
-        subscription.events = [event.value for event in events]
+        subscription.events = [event.value for event in payload.events]
 
     db.commit()
     db.refresh(subscription)  # Optional: reloads DB-generated fields (like ID/timestamps) onto the object
