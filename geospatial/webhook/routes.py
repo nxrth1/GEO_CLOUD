@@ -50,6 +50,7 @@ class WebhookSubscriptionUpdate(BaseModel):
     url: Optional[HttpUrl] = None
     events: Optional[List[WebhookEventType]] = None
 
+generate_new_secret = lambda: f"whsec_{secrets.token_urlsafe(32)}"  
 
 @router.get("/webhooks/events")
 def get_webhook_events() -> Response:
@@ -68,7 +69,7 @@ def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session 
     if invalid_events:
         raise HTTPException(status_code=400, detail={"error": f"Invalid event types: {invalid_events}"})
 
-    signed_secret = f"whsec_{secrets.token_urlsafe(32)}" # Generate a secure random secret
+    signed_secret = generate_new_secret()
     subscription = WebhookSubscription(
         owner_id = owner_id,
         url=str(payload.url),
@@ -91,11 +92,10 @@ def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session 
     }
 
 @router.get("/webhooks/subscriptions", response_model=list[WebhookSubscriptionResponse], status_code=status.HTTP_200_OK)
-def list_webhook_subscriptions(db: Session = Depends(get_db)) -> Response:
+def list_webhook_subscriptions(db: Session = Depends(get_db), owner_id: str = Depends(get_current_owner)) -> Response:
     """
     Lists the authenticated owner's subscriptions.
     """
-    owner_id = Depends(get_current_owner)
     subscriptions = db.query(WebhookSubscription).filter_by(owner_id=owner_id).all()
     return JSONResponse(content=[{
         "id": str(sub.id),
@@ -107,11 +107,10 @@ def list_webhook_subscriptions(db: Session = Depends(get_db)) -> Response:
 
 
 @router.get("/webhooks/subscriptions/{subscription_id}")
-def get_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
+def get_webhook_subscription(subscription_id: UUID, db: Session = Depends(get_db), owner_id: str = Depends(get_current_owner)) -> Response:
     """
     Retrieves one subscription.
     """
-    owner_id = Depends(get_current_owner)
     subscription = db.query(WebhookSubscription).filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
         raise HTTPException(detail="Subscription not found", status_code=404)
@@ -126,11 +125,10 @@ def get_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depends(g
 
 
 @router.patch("/webhooks/subscriptions/{subscription_id}")
-def update_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depends(get_db), payload: WebhookSubscriptionUpdate = None) -> Response:
+def update_webhook_subscription(subscription_id: UUID, db: Session = Depends(get_db), payload: WebhookSubscriptionUpdate = None, owner_id: str = Depends(get_current_owner)) -> Response:
     """
     Updates its URL or subscribed events.
     """
-    owner_id = Depends(get_current_owner)
     subscription = db.query(WebhookSubscription).filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
         raise HTTPException(detail="Subscription not found", status_code=404)
@@ -138,18 +136,19 @@ def update_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depend
     if not payload:
         raise HTTPException(detail="Invalid JSON payload", status_code=400)
 
-    url = payload.url
+    subscription.url = payload.url
     events = payload.events
 
     if url:
         subscription.url = url
     if events:
+
         # Validate events
         valid_events = {event.value for event in WebhookEventType}
         invalid_events = [event for event in events if event not in valid_events]
         if invalid_events:
             raise HTTPException(detail=f"Invalid event types: {invalid_events}", status_code=400)
-        subscription.events = events
+        subscription.events = [event.value for event in events]
 
     db.commit()
     db.refresh(subscription)  # Optional: reloads DB-generated fields (like ID/timestamps) onto the object
@@ -164,11 +163,10 @@ def update_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depend
     }, status_code=200)
 
 @router.delete("/webhooks/subscriptions/{subscription_id}")
-def delete_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
+def delete_webhook_subscription(subscription_id: UUID, db: Session = Depends(get_db), owner_id: str = Depends(get_current_owner)) -> Response:
     """
     Disables a subscription without deleting its history.
     """
-    owner_id = Depends(get_current_owner)
     subscription = db.query(WebhookSubscription).filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
         raise HTTPException(detail="Subscription not found", status_code=404)
@@ -180,11 +178,10 @@ def delete_webhook_subscription(subscription_id: uuid.UUID, db: Session = Depend
 
 
 @router.post("/webhooks/subscriptions/{subscription_id}/rotate-secret")
-def rotate_webhook_secret(subscription_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
+def rotate_webhook_secret(subscription_id: UUID, db: Session = Depends(get_db), owner_id: str = Depends(get_current_owner)) -> Response:
     """
     Rotates the secret for a subscription.
     """
-    owner_id = Depends(get_current_owner)
     subscription = db.query(WebhookSubscription).filter_by(id=subscription_id, owner_id=owner_id).first()
     if not subscription:
         raise HTTPException(detail="Subscription not found", status_code=404)
