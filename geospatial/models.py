@@ -183,6 +183,7 @@ class WebhookStatus(str, enum.Enum):
     PENDING = "pending"
     ACTIVE = "active"
     DISABLED = "disabled"
+    FAILED = "failed"
 
 
 class WebhookSubscription(Base):
@@ -193,6 +194,38 @@ class WebhookSubscription(Base):
     )
     verification_token = Column(
         EncryptedString(),
+        nullable=True,
+    )
+    verification_attempts = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    next_verification_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=func.now(),
+    )
+    verification_lease_expires_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    verification_lease_token = Column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
+    verified_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )   
+    verification_token_expires_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_verification_error = Column(
+        Text,
         nullable=True,
     )
 
@@ -221,25 +254,3 @@ class WebhookSubscription(Base):
         server_default=func.now(),
         nullable=False,
     )
-    verification_attempts = Column(
-        Integer,
-        nullable=False,
-        default=0,
-        server_default=text("0"),
-    )
-    next_verification_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-    verification_lease_expires_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=True,
-    )
-    verified_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-    )   
-
-
-
