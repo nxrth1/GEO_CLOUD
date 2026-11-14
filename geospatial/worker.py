@@ -295,12 +295,3 @@ if __name__ == "__main__":
     run_worker()
 
 
-"""
-Validate jobs before accepting them. Check that each operation has the required parameters and any required secondary dataset before creating a job. That way, bad jobs return a useful 422 immediately instead of failing later in the worker.
-Add dataset ownership and access control. The current dataset IDs are not tied to users or tenants. Before making the API available beyond trusted local use, add authentication and ensure users can only access their own datasets and jobs.
-Improve dataset management. Add listing and deletion, record dataset metadata, and define how uploads, size limits, and storage work. The current implementation stores GeoJSON files locally; a storage interface would make a later move to object storage easier.
-Add basic operational support. Provide health/readiness checks, configurable CORS and settings, structured logs, and deployment setup for running the API and worker together.
-Expand tests around the service lifecycle. Prioritize job recovery, dataset persistence, authorization boundaries, invalid job requests, and API error responses.
-Best first step: implement job parameter validation and worker recovery together, with tests. Those address the most immediate gaps in the existing job-processing flow.
-
-"""

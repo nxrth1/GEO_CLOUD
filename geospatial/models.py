@@ -191,6 +191,10 @@ class WebhookSubscription(Base):
         Index("ix_webhook_subscriptions_owner_id", "owner_id"),
         UniqueConstraint("id", "owner_id", name="uq_webhook_subscriptions_id_owner"),
     )
+    verification_token = Column(
+        EncryptedString(),
+        nullable=True,
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id = Column(String(255), nullable=False)
@@ -217,4 +221,25 @@ class WebhookSubscription(Base):
         server_default=func.now(),
         nullable=False,
     )
+    verification_attempts = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    next_verification_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    verification_lease_expires_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=True,
+    )
+    verified_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )   
+
+
 
