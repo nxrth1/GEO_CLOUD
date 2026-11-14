@@ -30,33 +30,12 @@ Failure
 Set the next retry time, release the lease or mark FAILED when attempts are exhausted.
 """
 import time
-from datetime import time
 from geospatial.models import WebhookSubscription, WebhookStatus
-from geospatial.worker import SessionLocal, heartbeat_context
-from webhook.routes import WebhookSubscriptionCreate
+from geospatial.database import SessionLocal
+
 from sqlalchemy import select, update, func
 from sqlalchemy.orm import Session
 from uuid import UUID
-
-
-
-def subscription_verification(WebhookSubscriptionCreate, WebhookStatus, SessionLocal):
-    if not WebhookSubscriptionCreate.events:
-        raise ValueError("At least one webhook event must be selected")
-    if not all(event in WebhookStatus.__members__ for event in WebhookSubscriptionCreate.events):
-        raise ValueError("Invalid webhook event(s) selected")
-    for _ in range(10):
-        try:
-            with SessionLocal.begin() as session:
-                subscription = claim_next_verification(session)
-                if subscription is None:
-                    return False
-                response = send_verification_challenge(subscription)
-                verify_challenge_response(response, subscription)
-                mark_subscription_verified(subscription)
-        except Exception as error:
-            schedule_verification_retry(subscription, error)
-    
 
 def process_next_verification():
     verification = claim_next_verification()
@@ -72,6 +51,23 @@ def process_next_verification():
         schedule_verification_retry(verification, error)
 
     return True
+
+
+
+def claim_next_verification():
+    pass
+
+def send_verification_challenge():
+    pass
+
+def verify_challenge_response():
+    pass
+def mark_subscription_verified():
+    pass
+def schedule_verification_retry():
+    pass
+
+
 
 
 def run_webhook_worker(poll_interval=2.0):
