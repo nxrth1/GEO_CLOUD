@@ -55,7 +55,8 @@ def process_next_verification():
 
 
 def claim_next_verification():
-    pass
+    with SessionLocal() as session:
+        return claim_next_verification(session)
 
 def send_verification_challenge():
     pass
