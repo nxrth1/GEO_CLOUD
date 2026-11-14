@@ -56,4 +56,6 @@ def claim_next_verification(session: Session, lease_duration: int = 300,  verifi
 
 
     return subscription
-    
+"""
+Later, we'll change this to return a small data snapshot so the worker doesn't accidentally depend on a detached ORM object.
+"""
