@@ -55,15 +55,21 @@ def get_webhook_events() -> Response:
     """
     Returns a list of all event types GEO_CLOUD supports.
     """
-    return JSONResponse(content=[e.value for e in WebhookEventType], status_code=200)
+    return JSONResponse(content=[e.value for e in WebhookEvent], status_code=200)
 
 @router.post("/webhooks/subscriptions",response_model=WebhookSubscriptionCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_webhook_subscription(payload: WebhookSubscriptionCreate, db: Session = Depends(get_db), owner_id: str = Depends(get_current_owner)) -> WebhookSubscriptionCreateResponse:
     """
     Registers a new webhook URL and its chosen events.
     """
-    valid_events = {event.value for event in WebhookEventType}
-    invalid_events = [event for event in payload.events if event not in valid_events]
+
+    if not payload.events:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one webhook event must be selected"
+        )
+    valid_events = {event.value for event in WebhookEvent}
+    invalid_events = [event.value for event in payload.events if event not in valid_events]
     if invalid_events:
         raise HTTPException(status_code=400, detail={"error": f"Invalid event types: {invalid_events}"})
 
@@ -123,7 +129,7 @@ def get_webhook_subscription(subscription_id: UUID, db: Session = Depends(get_db
 
 
 @router.patch("/webhooks/subscriptions/{subscription_id}")
-def update_webhook_subscription(subscription_id: UUID, db: Session = Depends(get_db), payload: WebhookSubscriptionUpdate = None, owner_id: str = Depends(get_current_owner)) -> Response:
+def update_webhook_subscription(subscription_id: UUID, db: Session = Depends(get_db), payload: WebhookSubscriptionUpdate, owner_id: str = Depends(get_current_owner)) -> Response:
     """
     Updates its URL or subscribed events.
     """
@@ -138,8 +144,8 @@ def update_webhook_subscription(subscription_id: UUID, db: Session = Depends(get
             raise HTTPException(detail="Events list cannot be empty", status_code=400)
 
         # Validate events
-        valid_events = {event.value for event in WebhookEventType}
-        invalid_events = [event for event in payload.events if event not in valid_events]
+        valid_events = {event.value for event in WebhookEvent}
+        invalid_events = [event.value for event in payload.events if event not in valid_events]
         if invalid_events:
             raise HTTPException(detail=f"Invalid event types: {invalid_events}", status_code=400)
         subscription.events = [event.value for event in payload.events]
