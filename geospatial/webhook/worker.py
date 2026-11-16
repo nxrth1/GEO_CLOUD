@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
+from sqlalchemy import update
 from sqlalchemy.orm import Session 
 
 from geospatial.models import WebhookSubscription, WebhookStatus
@@ -142,7 +143,7 @@ class SafeIPTransport(httpx.HTTPTransport):
         extensions=extensions,
     )
     response = super().handle_request(pinned_request)
-    self._verify_connected_peer(response)
+    self._verify_connected_peer(response, pinned_ip)
     return response
 
 def _verify_connected_peer(self, response: httpx.Response, expected_ip:str) -> None:
@@ -154,10 +155,10 @@ def _verify_connected_peer(self, response: httpx.Response, expected_ip:str) -> N
         )
 
     server_addr = network_stream.get_extra_info("server_addr")
-    if not server_addr and not isinstance(server_addr, tuple):
+    if not server_addr or not isinstance(server_addr, tuple):
           response.close()
           raise UnsafeWebhookURLError(
-              f"Connected peer IP {peer_ip} is not in allowed target IPs {self.allowed_ips}."
+              f"Could not determine the connected server IP."
           )
     try:
         peer_ip = _normalize_ip(server_addr[0])
@@ -179,7 +180,7 @@ def send_verification_challenge(verification: WebhookSubscription) -> httpx.Resp
     raise UnsafeWebhookURLError(
         f"Webhook URL '{verification.url}' did not resolve to any public IP addresses."
     )
-  challenge_token = verification.challenge_token
+  challenge_token = verification.verification_token
   if not challenge_token:
       raise PermanentVerificationError(
           "Subscription has no verification token."
@@ -220,10 +221,9 @@ def verify_challenge_response(
     raise PermanentVerificationError(
         f"Subscriber responded with status {response.status_code} instead of 200 OK."
     )
-  body = response.text.strip
+  body = response.text.strip()
   expected_token = verification.verification_token or ""
-
-  if not body or not secrets.compare_digest(body, verification.challenge_token):
+  if not body or not secrets.compare_digest(body, expected_token):
     raise PermanentVerificationError(
         "Subscriber's response did not match the expected challenge token."
     )
@@ -347,17 +347,3 @@ def schedule_verification_retry(
 
     return result.rowcount == 1
 
-backoff = min(
-  BASE_RETRY_DELAY_SECONDS * (2 ** (attempts -1)), 
-  MAX_RETRY_DELAY_SECONDS
-
-)
-
-  jitter = random.uniform(0, backoff * 0.2)
-  next_run = datetime.now(timezone.utc) + timedelta(seconds=backoff + jitter)
-
-  verification.status = WebhookStatus.PENDING
-  verification.next_verification_at = next_run
-  verification.last_error = str(error)[:1000]
-  _clear_lease(verification)
-  session.add(verification)
