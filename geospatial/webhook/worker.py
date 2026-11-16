@@ -179,14 +179,17 @@ def send_verification_challenge(verification: WebhookSubscription) -> httpx.Resp
     raise UnsafeWebhookURLError(
         f"Webhook URL '{verification.url}' did not resolve to any public IP addresses."
     )
-  challenge_token = claim_next_verification()
-  verification.challenge_token = challenge_token
+  challenge_token = verification.challenge_token
+  if not challenge_token:
+      raise PermanentVerificationError(
+          "Subscription has no verification token."
+      )
 
   payload = {
       "challenge_token": challenge_token,
       "subscription_id": str(verification.id),
   }
-  transport = SafeIPTransport(target_ips=target_ips)
+  transport = SafeIPTransport(target_ips=safe_ips)
 
   with httpx.Client(transport=transport, timeout=5.0, follow_redirects=False) as client:
     try:
@@ -217,61 +220,132 @@ def verify_challenge_response(
     raise PermanentVerificationError(
         f"Subscriber responded with status {response.status_code} instead of 200 OK."
     )
-  body = response.text.strip if response.text else ""
-  expected_token = verification.challemge_token or ""
+  body = response.text.strip
+  expected_token = verification.verification_token or ""
 
   if not body or not secrets.compare_digest(body, verification.challenge_token):
     raise PermanentVerificationError(
         "Subscriber's response did not match the expected challenge token."
     )
-def _clear_lease(verification: WebhookSubscription) -> None:
-  verification.lease_expires_at = None
-  verification.lease_claimed_at = None
-  verification.lease_claimed_until = None
-  verification.lease_claimed_by = None
+def _clear_lease(
+    verification: WebhookSubscription,
+    lease_token,
+) -> bool:
+
+    # Only the worker that owns this lease can clear it.
+    if verification.verification_lease_token != lease_token:
+        return False
+
+    verification.verification_lease_token = None
+    verification.verification_lease_expires_at = None
+
+    return True
 # ---------------------------------------------------------------------------
 # Step 3: State Updaters (Next Pieces to Implement)
 # ---------------------------------------------------------------------------
 def mark_subscription_verified(
-    session: Session, verification: WebhookSubscription
-) -> None:
-  now = datetimen.now(timezone.utc)
-  verification.status = WebhookStatus.verified
-  verification.verified_at = now
-  verification.next_verification_at = None
-  verification.lease_expires_at = None
-  verification.last_verification_error = None
-  _clear_lease(verification)  
-  session.add(verification)
+    session: Session,
+    verification: WebhookSubscription,
+    lease_token,
+) -> bool:
 
+    now = datetime.now(timezone.utc)
+
+    result = session.execute(
+        update(WebhookSubscription)
+        .where(
+            WebhookSubscription.id == verification.id,
+            WebhookSubscription.verification_lease_token == lease_token,
+        )
+        .values(
+            status=WebhookStatus.ACTIVE,
+            verified_at=now,
+            next_verification_at=None,
+            last_verification_error=None,
+            verification_lease_token=None,
+            verification_lease_expires_at=None,
+        )
+    )
+
+    return result.rowcount == 1
 
 def mark_subscription_failed(
-    session: Session, verification: WebhookSubscription, error: Exception
-) -> None:
-  now = datetime.now(time.timezone.utc)
-  verification.status = WebhookStatus.FAILED
-  verification.next_verification_at = None
-  verification.last_verification_error = str(error)[:1000]  # Truncate to 1000 chars
-  verification.last_verification_attempt_at = now
-  _clear_lease(verification)
-  session.add(verification)
+    session: Session,
+    verification: WebhookSubscription,
+    error: Exception,
+    lease_token,
+) -> bool:
 
+    result = session.execute(
+        update(WebhookSubscription)
+        .where(
+            WebhookSubscription.id == verification.id,
+            WebhookSubscription.verification_lease_token == lease_token,
+        )
+        .values(
+            status=WebhookStatus.FAILED,
+            next_verification_at=None,
+            last_verification_error=str(error)[:1000],
+            verification_lease_token=None,
+            verification_lease_expires_at=None,
+        )
+    )
+
+    return result.rowcount == 1
 
 def schedule_verification_retry(
-    session: Session, verification: WebhookSubscription, error: Exception
-) -> None:
-  attempts = (verification.verification_attempts or 0) + 1
-  verification.verification_attempts = attempts
-  if attempts >= MAX_VERIFICATION_ATTEMPTS:
-    mark_subscription_failed(
-      session,
-      verification,
-      RuntimeError(
-        f"Max verification attempts ({MAX_VERIFICATION_ATTEMPTS}) reached."
-        f"Last error: {error}"
-      ),
+    session: Session,
+    verification: WebhookSubscription,
+    error: Exception,
+    lease_token,
+) -> bool:
+
+    # Attempts were already incremented when the job was claimed.
+    attempts = verification.verification_attempts or 0
+
+    # Stop retrying after the maximum number of attempts.
+    if attempts >= MAX_VERIFICATION_ATTEMPTS:
+        return mark_subscription_failed(
+            session,
+            verification,
+            RuntimeError(
+                f"Maximum verification attempts "
+                f"({MAX_VERIFICATION_ATTEMPTS}) reached. "
+                f"Last error: {error}"
+            ),
+            lease_token,
+        )
+
+    # Calculate exponential backoff.
+    backoff = min(
+        BASE_RETRY_DELAY_SECONDS * (2 ** (attempts - 1)),
+        MAX_RETRY_DELAY_SECONDS,
     )
-  return
+
+    # Add random jitter to avoid synchronized retries.
+    jitter = random.uniform(0, backoff * 0.2)
+
+    next_run = datetime.now(timezone.utc) + timedelta(
+        seconds=backoff + jitter
+    )
+
+    # Update only if this worker still owns the lease.
+    result = session.execute(
+        update(WebhookSubscription)
+        .where(
+            WebhookSubscription.id == verification.id,
+            WebhookSubscription.verification_lease_token == lease_token,
+        )
+        .values(
+            status=WebhookStatus.PENDING,
+            next_verification_at=next_run,
+            last_verification_error=str(error)[:1000],
+            verification_lease_token=None,
+            verification_lease_expires_at=None,
+        )
+    )
+
+    return result.rowcount == 1
 
 backoff = min(
   BASE_RETRY_DELAY_SECONDS * (2 ** (attempts -1)), 
@@ -279,7 +353,7 @@ backoff = min(
 
 )
 
-  itter = random.uniform(0, backoff * 0.2)
+  jitter = random.uniform(0, backoff * 0.2)
   next_run = datetime.now(timezone.utc) + timedelta(seconds=backoff + jitter)
 
   verification.status = WebhookStatus.PENDING
