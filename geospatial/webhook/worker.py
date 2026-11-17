@@ -125,7 +125,7 @@ class SafeIPTransport(httpx.HTTPTransport):
     headers = request.headers.copy()
 
     if "host" not in headers:
-        host_headers = (
+        host_header = (
           f"[{original_host}]" if ":" in original_host else original_host
         )
         if request.url.port is not None:
@@ -146,7 +146,7 @@ class SafeIPTransport(httpx.HTTPTransport):
     self._verify_connected_peer(response, pinned_ip)
     return response
 
-def _verify_connected_peer(self, response: httpx.Response, expected_ip:str) -> None:
+  def _verify_connected_peer(self, response: httpx.Response, expected_ip:str) -> None:
     network_stream = response.extensions.get("network_stream")
     if network_stream is None:
         response.close()
@@ -175,43 +175,43 @@ def _verify_connected_peer(self, response: httpx.Response, expected_ip:str) -> N
             f"the pinned IP {expected_ip}."
         )
 def send_verification_challenge(verification: WebhookSubscription) -> httpx.Response:
-  safe_ips = validate_webhook_url(verification.url)
-  if not safe_ips:
-    raise UnsafeWebhookURLError(
-        f"Webhook URL '{verification.url}' did not resolve to any public IP addresses."
-    )
-  challenge_token = verification.verification_token
-  if not challenge_token:
-      raise PermanentVerificationError(
-          "Subscription has no verification token."
-      )
+    safe_ips = validate_webhook_url(verification.url)
+    if not safe_ips:
+        raise UnsafeWebhookURLError(
+            f"Webhook URL '{verification.url}' did not resolve to any public IP addresses."
+        )
+    challenge_token = verification.verification_token
+    if not challenge_token:
+        raise PermanentVerificationError(
+            "Subscription has no verification token."
+        )
 
-  payload = {
-      "challenge_token": challenge_token,
-      "subscription_id": str(verification.id),
-  }
-  transport = SafeIPTransport(target_ips=safe_ips)
+    payload = {
+        "challenge_token": challenge_token,
+        "subscription_id": str(verification.id),
+    }
+    transport = SafeIPTransport(target_ips=safe_ips)
 
-  with httpx.Client(transport=transport, timeout=5.0, follow_redirects=False) as client:
-    try:
-      response = client.post(
-        verification.url, 
-        json=payload, 
-        headers={"Content-Type": "application/json"})
-    except UnsafeWebhookURLError:
-        raise
+    with httpx.Client(transport=transport, timeout=5.0, follow_redirects=False) as client:
+        try:
+        response = client.post(
+            verification.url, 
+            json=payload, 
+            headers={"Content-Type": "application/json"})
+        except UnsafeWebhookURLError: 
+            raise
     except httpx.RequestError as exc:
-      raise RuntimeError(f"Network error occurred: {exc}") from exc
-  if 300 <= response.status_code < 400:
-    raise PermanentVerificationError(
-        f"Subscriber responded with a redirect (HTTP {response.status_code})."
-    )
-  if 400 <= response.status_code < 500 and response.status_code != 429:
-    raise PermanentVerificationError(
-        f"Subscriber responded with a client error (HTTP {response.status_code})."
-    )
-  response.raise_for_status()
-  return response
+        raise RuntimeError(f"Network error occurred: {exc}") from exc
+    if 300 <= response.status_code < 400:
+        raise PermanentVerificationError(
+            f"Subscriber responded with a redirect (HTTP {response.status_code})."
+        )
+    if 400 <= response.status_code < 500 and response.status_code != 429:
+        raise PermanentVerificationError(
+            f"Subscriber responded with a client error (HTTP {response.status_code})."
+        )
+    response.raise_for_status()
+    return response
 
 
 def verify_challenge_response(
